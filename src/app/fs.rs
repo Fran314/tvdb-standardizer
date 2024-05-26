@@ -18,12 +18,12 @@ pub struct DirEntry {
 
 pub type DirContent = Vec<DirEntry>;
 
-#[derive(Debug)]
-pub enum SelectionContent {
-    Dir(DirContent),
-    Video(String),
-    File,
-}
+// #[derive(Debug)]
+// pub enum SelectionContent {
+//     Dir(DirContent),
+//     Video(String),
+//     File,
+// }
 
 #[derive(Debug)]
 pub struct FileExplorerState {
@@ -266,36 +266,36 @@ impl FileExplorerState {
             .iter()
             .fold(PathBuf::new(), |acc, (name, _)| acc.join(name))
     }
-    // pub fn curr_content(&self) -> &DirContent {
-    //     let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
-    //     content
-    // }
-
-    pub fn selection_entry(&self) -> Option<DirEntry> {
-        let name = self.selection.to_owned()?;
+    pub fn curr_content(&self) -> &DirContent {
         let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
         content
-            .iter()
-            .find(|entry| entry.name == name)
-            .map(|entry| entry.to_owned())
     }
+
+    // pub fn selection_entry(&self) -> Option<DirEntry> {
+    //     let name = self.selection.to_owned()?;
+    //     let content = self.curr_content();
+    //     content
+    //         .iter()
+    //         .find(|entry| entry.name == name)
+    //         .map(|entry| entry.to_owned())
+    // }
     pub fn selection_name_type(&self) -> Option<(String, EntryType)> {
         let name = self.selection.to_owned()?;
-        let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
+        let content = self.curr_content();
         let entry_type = content
             .iter()
             .find(|entry| entry.name == name)
             .map(|entry| entry.entry_type.to_owned())?;
         Some((name, entry_type))
     }
-    pub fn selection_type(&self) -> Option<EntryType> {
-        let name = self.selection.to_owned()?;
-        let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
-        content
-            .iter()
-            .find(|entry| entry.name == name)
-            .map(|entry| entry.entry_type.to_owned())
-    }
+    // pub fn selection_type(&self) -> Option<EntryType> {
+    //     let name = self.selection.to_owned()?;
+    //     let content = self.curr_content();
+    //     content
+    //         .iter()
+    //         .find(|entry| entry.name == name)
+    //         .map(|entry| entry.entry_type.to_owned())
+    // }
 
     pub fn enter_dir(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();
@@ -326,32 +326,20 @@ impl FileExplorerState {
 
     pub fn select_next(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();
-        // let curr_path = self.curr_path();
-        let (_, curr_content) = self.tree.last().expect("Current path tree cannot be empty");
+        let content = self.curr_content();
 
         match &self.selection {
             None => {
-                self.selection = get_autoselect(curr_content).append_messages(&mut messages);
+                self.selection = get_autoselect(content).append_messages(&mut messages);
             }
             Some(name) => {
-                let mut new_selection = curr_content.first().map(|c| c.name.to_owned());
-
-                let mut i = curr_content.iter();
-                for entry in i.by_ref() {
-                    if &entry.name == name {
-                        break;
-                    }
-                }
-                if let Some(entry) = i.next() {
-                    new_selection = Some(entry.name.to_owned());
-                }
-
-                // let new_selection = new_selection.map(|new_selection| {
-                //     let new_name = new_selection.name.to_owned();
-                //     let new_content = get_content(curr_path, &new_name, &new_selection.entry_type)
-                //         .append_messages(&mut messages);
-                //     (new_name, new_content)
-                // });
+                let first_selection = content.first().map(|c| c.name.to_owned());
+                let new_selection = content
+                    .iter()
+                    .skip_while(|c| &c.name != name)
+                    .nth(1)
+                    .map(|c| c.name.to_owned())
+                    .or(first_selection);
 
                 self.selection = new_selection;
             }
@@ -362,32 +350,21 @@ impl FileExplorerState {
 
     pub fn select_prev(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();
-        // let curr_path = self.curr_path();
-        let (_, curr_content) = self.tree.last().expect("Current path tree cannot be empty");
+        let content = self.curr_content();
 
         match &self.selection {
             None => {
-                self.selection = get_autoselect(curr_content).append_messages(&mut messages);
+                self.selection = get_autoselect(content).append_messages(&mut messages);
             }
             Some(name) => {
-                let mut new_selection = curr_content.last().map(|c| c.name.to_owned());
-
-                let mut i = curr_content.iter().rev();
-                for entry in i.by_ref() {
-                    if &entry.name == name {
-                        break;
-                    }
-                }
-                if let Some(entry) = i.next() {
-                    new_selection = Some(entry.name.to_owned());
-                }
-
-                // let new_selection = new_selection.map(|new_selection| {
-                //     let new_name = new_selection.name.to_owned();
-                //     let new_content = get_content(curr_path, &new_name, &new_selection.entry_type)
-                //         .append_messages(&mut messages);
-                //     (new_name, new_content)
-                // });
+                let last_selection = content.last().map(|c| c.name.to_owned());
+                let new_selection = content
+                    .iter()
+                    .rev()
+                    .skip_while(|c| &c.name != name)
+                    .nth(1)
+                    .map(|c| c.name.to_owned())
+                    .or(last_selection);
 
                 self.selection = new_selection;
             }

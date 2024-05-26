@@ -1,4 +1,4 @@
-use std::{cmp::min, collections::VecDeque};
+use std::cmp::{max, min};
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
@@ -231,7 +231,8 @@ impl<'a> Widget for DirTraverser<'a> {
 // }
 
 pub struct TargetViewer<'a> {
-    targets: &'a VecDeque<Target>,
+    targets: &'a Vec<Target>,
+    target: &'a String,
     active: bool,
 }
 
@@ -239,8 +240,12 @@ impl<'a> Widget for TargetViewer<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         ratatui::widgets::Widget::render(Clear, area, buf);
 
-        let Self { targets, active } = self;
-        let (mode_style, default_style) = match active {
+        let Self {
+            targets,
+            target,
+            active,
+        } = self;
+        let (selected_style, default_style) = match active {
             true => (Style::default().yellow().bold(), Style::default()),
             false => (
                 Style::default().fg(Color::DarkGray).bold(),
@@ -251,19 +256,17 @@ impl<'a> Widget for TargetViewer<'a> {
         let area = surrounding_block("target", Alignment::Center, default_style, area, buf)
             .inner(&Margin::new(1, 0));
 
-        let mut iter = targets.iter().map(|mode| &mode.label);
-        if let (Some(first), Some(second)) = (iter.next(), iter.next()) {
-            let mut text = vec![
-                Line::from(Span::styled(first, mode_style)),
-                Line::from(Span::styled(second, default_style)),
-            ];
-            text.append(
-                &mut iter
-                    .map(|mode| Line::from(Span::styled(mode, default_style)))
-                    .collect::<Vec<Line>>(),
-            );
-            Paragraph::new(text).render(area, buf);
-        }
+        let text: Vec<Line> = targets
+            .iter()
+            .map(|t| {
+                if &t.label == target {
+                    Line::from(Span::styled(&t.label, selected_style))
+                } else {
+                    Line::from(Span::styled(&t.label, default_style))
+                }
+            })
+            .collect();
+        Paragraph::new(text).render(area, buf);
     }
 }
 pub struct ModeViewer<'a> {
@@ -276,7 +279,7 @@ impl<'a> Widget for ModeViewer<'a> {
         ratatui::widgets::Widget::render(Clear, area, buf);
 
         let Self { mode, active } = self;
-        let (mode_style, default_style) = match active {
+        let (selected_style, default_style) = match active {
             true => (Style::default().yellow().bold(), Style::default()),
             false => (
                 Style::default().fg(Color::DarkGray).bold(),
@@ -288,8 +291,8 @@ impl<'a> Widget for ModeViewer<'a> {
             .inner(&Margin::new(1, 0));
 
         let (movie_style, series_style) = match mode {
-            Mode::Movie => (mode_style, default_style),
-            Mode::Series => (default_style, mode_style),
+            Mode::Movie => (selected_style, default_style),
+            Mode::Series => (default_style, selected_style),
         };
         let text = vec![
             Line::from(Span::styled("Movie", movie_style)),
@@ -309,7 +312,7 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
     // let explorer = regions[0];
     // let content_view = regions[1];
 
-    let target_view_width = std::cmp::max(
+    let target_view_width = max(
         app.config
             .targets
             .iter()
@@ -342,10 +345,11 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
 
     let target_viewer = TargetViewer {
         targets: &app.config.targets,
+        target: &app.target,
         active,
     };
     let mode_viewer = ModeViewer {
-        mode: &app.mode,
+        mode: &app.query_state.mode,
         active,
     };
 
@@ -634,11 +638,6 @@ fn cheatsheet(commands: Vec<(&str, &str)>, active: bool, frame: &mut Frame, rect
 
 /// Renders the user interface widgets.
 pub fn render(app: &App, frame: &mut Frame) {
-    // This is where you add new widgets.
-    // See the following resources:
-    // - https://docs.rs/ratatui/latest/ratatui/widgets/index.html
-    // - https://github.com/ratatui-org/ratatui/tree/master/examples
-
     let width = std::cmp::min(frame.size().width, 100);
     let height = std::cmp::min(frame.size().height, 40);
     let x = (frame.size().width - width) / 2;
@@ -670,7 +669,8 @@ pub fn render(app: &App, frame: &mut Frame) {
     )
     .set(line::ROUNDED);
 
-    let messages_rect = Rect::new(x, y, 28, layout[0].height);
+    // let messages_rect = Rect::new(x, y, 28, layout[0].height);
+    let messages_rect = Rect::new(0, 0, 28, layout[0].height);
     frame.render_widget(messages, messages_rect);
 
     let cheatsheet_height = 4 + 2;

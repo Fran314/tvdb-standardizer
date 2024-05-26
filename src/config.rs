@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+// use std::collections::VecDeque;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Target {
@@ -9,7 +9,7 @@ pub struct Target {
 pub struct Config {
     pub omdb_api_key: String,
     pub storage_path: String,
-    pub targets: VecDeque<Target>,
+    pub targets: Vec<Target>,
 }
 
 pub fn read_config() -> Result<Config, Box<dyn std::error::Error>> {

@@ -1,21 +1,20 @@
 mod fs;
 
-pub use fs::{DirContent, EntryType, FileExplorerState, SelectionContent};
+pub use fs::{DirContent, EntryType, FileExplorerState};
 
 mod query;
 
-pub use query::QueryState;
+pub use query::{Mode, QueryState};
 
 use crate::{config::Config, messenger::Message};
 
-/// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Debug, PartialEq)]
-pub enum Mode {
-    Movie,
-    Series,
-}
+// #[derive(Debug, PartialEq)]
+// pub enum Mode {
+//     Movie,
+//     Series,
+// }
 #[derive(Debug, PartialEq)]
 pub enum State {
     FileExplorer,
@@ -28,7 +27,7 @@ pub struct App {
 
     pub running: bool,
 
-    pub mode: Mode,
+    pub target: String,
     pub state: State,
     pub messages: Vec<Message>,
 
@@ -44,10 +43,16 @@ impl App {
             query_state.query_movie(name);
         }
 
+        let target = config
+            .targets
+            .first()
+            .expect("config must have targets")
+            .label
+            .to_owned();
         Ok(Self {
             config,
             running: true,
-            mode: Mode::Movie,
+            target,
             state: State::FileExplorer,
             messages: Vec::new(),
             fe_state,
@@ -159,8 +164,13 @@ impl App {
             )
         };
 
-        let link_path =
-            std::path::PathBuf::from(&self.config.targets.front().unwrap().path).join(title);
+        let target_path = &self
+            .config
+            .targets
+            .first()
+            .expect("config must have targets")
+            .path;
+        let link_path = std::path::PathBuf::from(target_path).join(title);
 
         std::os::unix::fs::symlink(endpoint_path, link_path)
             .map_err(|err| Message::error(format!("cannot process object: {err}")))?;
@@ -177,15 +187,31 @@ impl App {
     }
 
     pub fn change_mode(&mut self) {
-        self.mode = match self.mode {
-            Mode::Movie => Mode::Series,
-            Mode::Series => Mode::Movie,
-        }
+        self.query_state.change_mode();
+        // self.mode = match self.mode {
+        //     Mode::Movie => Mode::Series,
+        //     Mode::Series => Mode::Movie,
+        // }
     }
 
     pub fn change_target(&mut self) {
-        if let Some(first) = self.config.targets.pop_front() {
-            self.config.targets.push_back(first);
-        }
+        let first_target = self
+            .config
+            .targets
+            .first()
+            .expect("config must have targets")
+            .label
+            .to_owned();
+
+        let new_target = self
+            .config
+            .targets
+            .iter()
+            .skip_while(|t| t.label != self.target)
+            .nth(1)
+            .map(|t| t.label.to_owned())
+            .unwrap_or(first_target);
+
+        self.target = new_target;
     }
 }
