@@ -9,7 +9,7 @@ pub enum EntryType {
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirEntry {
     pub name: String,
     pub entry_type: EntryType,
@@ -28,57 +28,58 @@ pub enum SelectionContent {
 #[derive(Debug)]
 pub struct FileExplorerState {
     pub tree: Vec<(String, DirContent)>,
-    pub selection: Option<(String, SelectionContent)>,
+    pub selection: Option<String>,
 }
 
-fn read_entry<P: AsRef<Path>>(
-    path: P,
-    entry: Result<std::fs::DirEntry, std::io::Error>,
-) -> Result<DirEntry, Message> {
-    let entry = entry.map_err(|err| {
-        let err = format!("failed to open entry at path {:?}\n{}", path.as_ref(), err);
-        Message::error(err)
-    })?;
-
-    let entry_path = entry.path().to_owned();
-    let name = entry_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or(Message::error(format!(
-            "failed to get name at path {:?}",
-            entry_path
-        )))?
-        .to_owned();
-
-    let entry_type = match entry_path.is_dir() {
-        true => EntryType::Dir,
-        false => match Path::new(&name).extension().and_then(|ext| ext.to_str()) {
-            Some("mkv") => EntryType::Video,
-            _ => EntryType::Unknown,
-        },
-    };
-
-    let info = match entry_type {
-        EntryType::Dir => 0,
-        EntryType::Video | EntryType::Unknown => {
-            let metadata = std::fs::symlink_metadata(&entry_path).map_err(|err| {
-                println!("{entry:#?}");
-                Message::error(format!(
-                    "failed to get file size at path {:?}\n{}",
-                    entry_path, err
-                ))
-            })?;
-            metadata.len()
-        }
-    };
-
-    Ok(DirEntry {
-        name: name.to_owned(),
-        entry_type,
-        info,
-    })
-}
 fn read_dir<P: AsRef<Path>>(path: P) -> WithMessages<DirContent> {
+    fn read_entry<P: AsRef<Path>>(
+        path: P,
+        entry: Result<std::fs::DirEntry, std::io::Error>,
+    ) -> Result<DirEntry, Message> {
+        let entry = entry.map_err(|err| {
+            let err = format!("failed to open entry at path {:?}\n{}", path.as_ref(), err);
+            Message::error(err)
+        })?;
+
+        let entry_path = entry.path().to_owned();
+        let name = entry_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or(Message::error(format!(
+                "failed to get name at path {:?}",
+                entry_path
+            )))?
+            .to_owned();
+
+        let entry_type = match entry_path.is_dir() {
+            true => EntryType::Dir,
+            false => match Path::new(&name).extension().and_then(|ext| ext.to_str()) {
+                Some("mkv") | Some("mp4") => EntryType::Video,
+                _ => EntryType::Unknown,
+            },
+        };
+
+        let info = match entry_type {
+            EntryType::Dir => 0,
+            EntryType::Video | EntryType::Unknown => {
+                let metadata = std::fs::symlink_metadata(&entry_path).map_err(|err| {
+                    println!("{entry:#?}");
+                    Message::error(format!(
+                        "failed to get file size at path {:?}\n{}",
+                        entry_path, err
+                    ))
+                })?;
+                metadata.len()
+            }
+        };
+
+        Ok(DirEntry {
+            name: name.to_owned(),
+            entry_type,
+            info,
+        })
+    }
+
     let mut output = DirContent::new();
     let mut messages = Vec::new();
 
@@ -113,10 +114,7 @@ fn read_dir<P: AsRef<Path>>(path: P) -> WithMessages<DirContent> {
     WithMessages::new(output, messages)
 }
 
-fn get_autoselect<P: AsRef<Path>>(
-    path: P,
-    content: &DirContent,
-) -> WithMessages<Option<(String, SelectionContent)>> {
+fn get_autoselect(content: &DirContent) -> WithMessages<Option<String>> {
     match content.first() {
         None => WithMessages::default(),
         Some(first_entry) => {
@@ -126,50 +124,52 @@ fn get_autoselect<P: AsRef<Path>>(
                 .max_by_key(|entry| entry.info)
                 .unwrap_or(first_entry);
 
-            get_content(path, &selection.name, &selection.entry_type)
-                .map(|content| Some((selection.name.to_owned(), content)))
+            WithMessages::from_value(Some(selection.name.to_owned()))
+
+            // get_content(path, &selection.name, &selection.entry_type)
+            //     .map(|content| Some((selection.name.to_owned(), content)))
         }
     }
 }
 
-fn get_content<P: AsRef<Path>>(
-    base_path: P,
-    name: &str,
-    entry_type: &EntryType,
-) -> WithMessages<SelectionContent> {
-    match entry_type {
-        EntryType::Dir => read_dir(base_path.as_ref().join(name)).map(SelectionContent::Dir),
-        EntryType::Video => WithMessages::from_value(SelectionContent::Video(
-            movie_name_heuristics(name.to_owned()),
-        )),
-        EntryType::Unknown => WithMessages::from_value(SelectionContent::File),
-    }
-}
+// fn get_content<P: AsRef<Path>>(
+//     base_path: P,
+//     name: &str,
+//     entry_type: &EntryType,
+// ) -> WithMessages<SelectionContent> {
+//     match entry_type {
+//         EntryType::Dir => read_dir(base_path.as_ref().join(name)).map(SelectionContent::Dir),
+//         EntryType::Video => WithMessages::from_value(SelectionContent::Video(
+//             movie_name_heuristics(name.to_owned()),
+//         )),
+//         EntryType::Unknown => WithMessages::from_value(SelectionContent::File),
+//     }
+// }
 
-fn movie_name_heuristics(filename: String) -> String {
-    let ignore = regex::Regex::new(
-        &[
-            "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
-        ]
-        .join("|"),
-    )
-    .unwrap();
-    let split = regex::Regex::new(r"\.|\s").unwrap();
-    let year = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-
-    let filename = ignore.replace_all(&filename, " ");
-    let blocks = split.split(&filename);
-
-    let mut heuristic = String::new();
-    for block in blocks.filter(|s| !s.is_empty()) {
-        if year.is_match(block) {
-            break;
-        }
-
-        heuristic = heuristic + " " + block;
-    }
-    heuristic.trim().to_owned()
-}
+// fn movie_name_heuristics(filename: String) -> String {
+//     let ignore = regex::Regex::new(
+//         &[
+//             "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
+//         ]
+//         .join("|"),
+//     )
+//     .unwrap();
+//     let split = regex::Regex::new(r"\.|\s").unwrap();
+//     let year = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
+//
+//     let filename = ignore.replace_all(&filename, " ");
+//     let blocks = split.split(&filename);
+//
+//     let mut heuristic = String::new();
+//     for block in blocks.filter(|s| !s.is_empty()) {
+//         if year.is_match(block) {
+//             break;
+//         }
+//
+//         heuristic = heuristic + " " + block;
+//     }
+//     heuristic.trim().to_owned()
+// }
 
 // pub enum SearchParams {
 //     Movie {
@@ -254,9 +254,9 @@ impl FileExplorerState {
             tree.push((name.to_owned(), dir_content));
         }
 
-        let selection = tree.last().and_then(|(_, content)| {
-            get_autoselect(partial_path, content).append_messages(&mut warnings)
-        });
+        let selection = tree
+            .last()
+            .and_then(|(_, content)| get_autoselect(content).append_messages(&mut warnings));
 
         Ok((Self { tree, selection }, warnings))
     }
@@ -266,24 +266,47 @@ impl FileExplorerState {
             .iter()
             .fold(PathBuf::new(), |acc, (name, _)| acc.join(name))
     }
+    // pub fn curr_content(&self) -> &DirContent {
+    //     let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
+    //     content
+    // }
+
+    pub fn selection_entry(&self) -> Option<DirEntry> {
+        let name = self.selection.to_owned()?;
+        let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
+        content
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.to_owned())
+    }
+    pub fn selection_name_type(&self) -> Option<(String, EntryType)> {
+        let name = self.selection.to_owned()?;
+        let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
+        let entry_type = content
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.entry_type.to_owned())?;
+        Some((name, entry_type))
+    }
+    pub fn selection_type(&self) -> Option<EntryType> {
+        let name = self.selection.to_owned()?;
+        let (_, content) = self.tree.last().expect("Current path tree cannot be empty");
+        content
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.entry_type.to_owned())
+    }
 
     pub fn enter_dir(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();
-
         let curr_path = self.curr_path();
 
-        let Self { tree, selection } = self;
-
-        let temp_selection = selection.take();
-
-        if let Some((name, SelectionContent::Dir(content))) = temp_selection {
-            *selection =
-                get_autoselect(curr_path.join(&name), &content).append_messages(&mut messages);
-
-            tree.push((name.to_owned(), content));
+        if let Some((name, EntryType::Dir)) = self.selection_name_type() {
+            let content = read_dir(curr_path.join(&name)).append_messages(&mut messages);
+            self.selection = get_autoselect(&content).append_messages(&mut messages);
+            self.tree.push((name.to_owned(), content));
             WithMessages::from_messages(messages)
         } else {
-            *selection = temp_selection;
             WithMessages::from_message(Message::error(
                 "cannot enter current selection as it is not a directory".to_owned(),
             ))
@@ -292,10 +315,7 @@ impl FileExplorerState {
 
     pub fn exit_dir(&mut self) -> WithMessages<()> {
         if self.tree.len() > 1 {
-            self.selection = self
-                .tree
-                .pop()
-                .map(|(name, content)| (name, SelectionContent::Dir(content)));
+            self.selection = self.tree.pop().map(|(name, _)| name);
             WithMessages::default()
         } else {
             WithMessages::from_message(Message::warning(
@@ -306,19 +326,15 @@ impl FileExplorerState {
 
     pub fn select_next(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();
-        let curr_path = self
-            .tree
-            .iter()
-            .fold(PathBuf::new(), |acc, (name, _)| acc.join(name));
+        // let curr_path = self.curr_path();
         let (_, curr_content) = self.tree.last().expect("Current path tree cannot be empty");
 
         match &self.selection {
             None => {
-                self.selection =
-                    get_autoselect(curr_path, curr_content).append_messages(&mut messages);
+                self.selection = get_autoselect(curr_content).append_messages(&mut messages);
             }
-            Some((name, _)) => {
-                let mut new_selection = curr_content.first();
+            Some(name) => {
+                let mut new_selection = curr_content.first().map(|c| c.name.to_owned());
 
                 let mut i = curr_content.iter();
                 for entry in i.by_ref() {
@@ -327,15 +343,15 @@ impl FileExplorerState {
                     }
                 }
                 if let Some(entry) = i.next() {
-                    new_selection = Some(entry);
+                    new_selection = Some(entry.name.to_owned());
                 }
 
-                let new_selection = new_selection.map(|new_selection| {
-                    let new_name = new_selection.name.to_owned();
-                    let new_content = get_content(curr_path, &new_name, &new_selection.entry_type)
-                        .append_messages(&mut messages);
-                    (new_name, new_content)
-                });
+                // let new_selection = new_selection.map(|new_selection| {
+                //     let new_name = new_selection.name.to_owned();
+                //     let new_content = get_content(curr_path, &new_name, &new_selection.entry_type)
+                //         .append_messages(&mut messages);
+                //     (new_name, new_content)
+                // });
 
                 self.selection = new_selection;
             }
@@ -346,19 +362,15 @@ impl FileExplorerState {
 
     pub fn select_prev(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();
-        let curr_path = self
-            .tree
-            .iter()
-            .fold(PathBuf::new(), |acc, (name, _)| acc.join(name));
+        // let curr_path = self.curr_path();
         let (_, curr_content) = self.tree.last().expect("Current path tree cannot be empty");
 
         match &self.selection {
             None => {
-                self.selection =
-                    get_autoselect(curr_path, curr_content).append_messages(&mut messages);
+                self.selection = get_autoselect(curr_content).append_messages(&mut messages);
             }
-            Some((name, _)) => {
-                let mut new_selection = curr_content.last();
+            Some(name) => {
+                let mut new_selection = curr_content.last().map(|c| c.name.to_owned());
 
                 let mut i = curr_content.iter().rev();
                 for entry in i.by_ref() {
@@ -367,15 +379,15 @@ impl FileExplorerState {
                     }
                 }
                 if let Some(entry) = i.next() {
-                    new_selection = Some(entry);
+                    new_selection = Some(entry.name.to_owned());
                 }
 
-                let new_selection = new_selection.map(|new_selection| {
-                    let new_name = new_selection.name.to_owned();
-                    let new_content = get_content(curr_path, &new_name, &new_selection.entry_type)
-                        .append_messages(&mut messages);
-                    (new_name, new_content)
-                });
+                // let new_selection = new_selection.map(|new_selection| {
+                //     let new_name = new_selection.name.to_owned();
+                //     let new_content = get_content(curr_path, &new_name, &new_selection.entry_type)
+                //         .append_messages(&mut messages);
+                //     (new_name, new_content)
+                // });
 
                 self.selection = new_selection;
             }

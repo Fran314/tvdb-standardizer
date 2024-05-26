@@ -20,6 +20,7 @@ pub fn handle_file_explorer_key_events(key_event: KeyEvent, app: &mut App) -> Ap
         KeyCode::Char('l') | KeyCode::Right => app.enter_dir(),
         KeyCode::Char('s') => app.state = State::MovieSelection,
         KeyCode::Char('m') => app.change_mode(),
+        KeyCode::Char('t') => app.change_target(),
         _ => {}
     }
     Ok(())

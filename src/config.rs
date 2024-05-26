@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct DestMode {
+pub struct Target {
     pub label: String,
     pub path: String,
 }
@@ -9,7 +9,7 @@ pub struct DestMode {
 pub struct Config {
     pub omdb_api_key: String,
     pub storage_path: String,
-    pub modes: VecDeque<DestMode>,
+    pub targets: VecDeque<Target>,
 }
 
 pub fn read_config() -> Result<Config, Box<dyn std::error::Error>> {

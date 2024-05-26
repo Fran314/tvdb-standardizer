@@ -12,6 +12,11 @@ use crate::{config::Config, messenger::Message};
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Debug, PartialEq)]
+pub enum Mode {
+    Movie,
+    Series,
+}
+#[derive(Debug, PartialEq)]
 pub enum State {
     FileExplorer,
     MovieSelection,
@@ -23,6 +28,7 @@ pub struct App {
 
     pub running: bool,
 
+    pub mode: Mode,
     pub state: State,
     pub messages: Vec<Message>,
 
@@ -34,13 +40,14 @@ impl App {
     pub fn new(config: Config) -> Result<Self, Message> {
         let (fe_state, _) = FileExplorerState::new()?;
         let mut query_state = QueryState::new(config.omdb_api_key.to_owned());
-        if let Some((_, SelectionContent::Video(title))) = &fe_state.selection {
-            query_state.query_movie(title.to_owned());
+        if let Some((name, EntryType::Video)) = fe_state.selection_name_type() {
+            query_state.query_movie(name);
         }
 
         Ok(Self {
             config,
             running: true,
+            mode: Mode::Movie,
             state: State::FileExplorer,
             messages: Vec::new(),
             fe_state,
@@ -62,8 +69,8 @@ impl App {
         self.fe_state
             .enter_dir()
             .append_messages(&mut self.messages);
-        if let Some((_, SelectionContent::Video(title))) = &self.fe_state.selection {
-            self.query_state.query_movie(title.to_owned());
+        if let Some((name, EntryType::Video)) = self.fe_state.selection_name_type() {
+            self.query_state.query_movie(name);
         }
     }
 
@@ -75,8 +82,8 @@ impl App {
         self.fe_state
             .select_next()
             .append_messages(&mut self.messages);
-        if let Some((_, SelectionContent::Video(title))) = &self.fe_state.selection {
-            self.query_state.query_movie(title.to_owned());
+        if let Some((name, EntryType::Video)) = self.fe_state.selection_name_type() {
+            self.query_state.query_movie(name);
         }
     }
 
@@ -84,8 +91,8 @@ impl App {
         self.fe_state
             .select_prev()
             .append_messages(&mut self.messages);
-        if let Some((_, SelectionContent::Video(title))) = &self.fe_state.selection {
-            self.query_state.query_movie(title.to_owned());
+        if let Some((name, EntryType::Video)) = self.fe_state.selection_name_type() {
+            self.query_state.query_movie(name);
         }
     }
 
@@ -117,7 +124,7 @@ impl App {
 
     fn failable_process_selection(&mut self) -> Result<(), Message> {
         let endpoint_path = {
-            let Some((name, SelectionContent::Video(_))) = &self.fe_state.selection else {
+            let Some((name, EntryType::Video)) = self.fe_state.selection_name_type() else {
                 return Err(Message::error(
                     "cannot process current selection: it is not a movie".to_owned(),
                 ));
@@ -153,7 +160,7 @@ impl App {
         };
 
         let link_path =
-            std::path::PathBuf::from(&self.config.modes.front().unwrap().path).join(title);
+            std::path::PathBuf::from(&self.config.targets.front().unwrap().path).join(title);
 
         std::os::unix::fs::symlink(endpoint_path, link_path)
             .map_err(|err| Message::error(format!("cannot process object: {err}")))?;
@@ -170,8 +177,15 @@ impl App {
     }
 
     pub fn change_mode(&mut self) {
-        if let Some(first) = self.config.modes.pop_front() {
-            self.config.modes.push_back(first);
+        self.mode = match self.mode {
+            Mode::Movie => Mode::Series,
+            Mode::Series => Mode::Movie,
+        }
+    }
+
+    pub fn change_target(&mut self) {
+        if let Some(first) = self.config.targets.pop_front() {
+            self.config.targets.push_back(first);
         }
     }
 }

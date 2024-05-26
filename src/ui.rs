@@ -12,8 +12,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, DirContent, EntryType, FileExplorerState, QueryState, SelectionContent, State},
-    config::DestMode,
+    app::{App, DirContent, EntryType, FileExplorerState, Mode, QueryState, State},
+    config::Target,
     messenger::Urgency,
 };
 
@@ -135,11 +135,11 @@ impl<'a> Widget for DirTraverser<'a> {
             [.., outer, inner] => {
                 let regions = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+                    .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
                     .split(area);
 
                 let inner_viewer = match &self.state.selection {
-                    Some((s, _)) => DirViewer {
+                    Some(s) => DirViewer {
                         content: &inner.1,
                         selection: Some(s.to_owned()),
                         active: self.active,
@@ -161,7 +161,7 @@ impl<'a> Widget for DirTraverser<'a> {
             }
             [last] => {
                 let viewer = match &self.state.selection {
-                    Some((s, _)) => DirViewer {
+                    Some(s) => DirViewer {
                         content: &last.1,
                         selection: Some(s.to_owned()),
                         active: self.active,
@@ -182,64 +182,64 @@ impl<'a> Widget for DirTraverser<'a> {
     }
 }
 
-pub struct ContentViewer<'a> {
-    content: Option<&'a SelectionContent>,
+// pub struct ContentViewer<'a> {
+//     content: Option<&'a SelectionContent>,
+//     active: bool,
+// }
+//
+// impl<'a> Widget for ContentViewer<'a> {
+//     fn render(self, area: Rect, buf: &mut Buffer) {
+//         ratatui::widgets::Widget::render(Clear, area, buf);
+//
+//         let border_style = match self.active {
+//             true => Style::default(),
+//             false => Style::default().fg(Color::DarkGray),
+//         };
+//
+//         let area = surrounding_block(
+//             "selection content",
+//             Alignment::Center,
+//             border_style,
+//             area,
+//             buf,
+//         );
+//         match self.content {
+//             Some(SelectionContent::Dir(content)) => {
+//                 let dir_viewer = DirViewer {
+//                     content,
+//                     selection: None,
+//                     active: self.active,
+//                 };
+//
+//                 dir_viewer.render(area, buf);
+//             }
+//             Some(SelectionContent::Video(title)) => {
+//                 Paragraph::new(title.to_owned()).render(area, buf);
+//             }
+//             Some(_) => {
+//                 let dir_viewer = DirViewer {
+//                     content: &Vec::new(),
+//                     selection: None,
+//                     active: self.active,
+//                 };
+//
+//                 dir_viewer.render(area, buf);
+//             }
+//             None => {}
+//         }
+//     }
+// }
+
+pub struct TargetViewer<'a> {
+    targets: &'a VecDeque<Target>,
     active: bool,
 }
 
-impl<'a> Widget for ContentViewer<'a> {
+impl<'a> Widget for TargetViewer<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         ratatui::widgets::Widget::render(Clear, area, buf);
 
-        let border_style = match self.active {
-            true => Style::default(),
-            false => Style::default().fg(Color::DarkGray),
-        };
-
-        let area = surrounding_block(
-            "selection content",
-            Alignment::Center,
-            border_style,
-            area,
-            buf,
-        );
-        match self.content {
-            Some(SelectionContent::Dir(content)) => {
-                let dir_viewer = DirViewer {
-                    content,
-                    selection: None,
-                    active: self.active,
-                };
-
-                dir_viewer.render(area, buf);
-            }
-            Some(SelectionContent::Video(title)) => {
-                Paragraph::new(title.to_owned()).render(area, buf);
-            }
-            Some(_) => {
-                let dir_viewer = DirViewer {
-                    content: &Vec::new(),
-                    selection: None,
-                    active: self.active,
-                };
-
-                dir_viewer.render(area, buf);
-            }
-            None => {}
-        }
-    }
-}
-
-pub struct ModeViewer<'a> {
-    modes: &'a VecDeque<DestMode>,
-    active: bool,
-}
-
-impl<'a> Widget for ModeViewer<'a> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        ratatui::widgets::Widget::render(Clear, area, buf);
-
-        let Self { modes, active } = self;
+        let Self { targets, active } = self;
         let (mode_style, default_style) = match active {
             true => (Style::default().yellow().bold(), Style::default()),
             false => (
@@ -248,10 +248,10 @@ impl<'a> Widget for ModeViewer<'a> {
             ),
         };
 
-        let area = surrounding_block("mode", Alignment::Center, default_style, area, buf)
+        let area = surrounding_block("target", Alignment::Center, default_style, area, buf)
             .inner(&Margin::new(1, 0));
 
-        let mut iter = modes.iter().map(|mode| &mode.label);
+        let mut iter = targets.iter().map(|mode| &mode.label);
         if let (Some(first), Some(second)) = (iter.next(), iter.next()) {
             let mut text = vec![
                 Line::from(Span::styled(first, mode_style)),
@@ -266,53 +266,92 @@ impl<'a> Widget for ModeViewer<'a> {
         }
     }
 }
+pub struct ModeViewer<'a> {
+    mode: &'a Mode,
+    active: bool,
+}
 
+impl<'a> Widget for ModeViewer<'a> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        ratatui::widgets::Widget::render(Clear, area, buf);
+
+        let Self { mode, active } = self;
+        let (mode_style, default_style) = match active {
+            true => (Style::default().yellow().bold(), Style::default()),
+            false => (
+                Style::default().fg(Color::DarkGray).bold(),
+                Style::default().fg(Color::DarkGray),
+            ),
+        };
+
+        let area = surrounding_block("mode", Alignment::Center, default_style, area, buf)
+            .inner(&Margin::new(1, 0));
+
+        let (movie_style, series_style) = match mode {
+            Mode::Movie => (mode_style, default_style),
+            Mode::Series => (default_style, mode_style),
+        };
+        let text = vec![
+            Line::from(Span::styled("Movie", movie_style)),
+            Line::from(Span::styled("Series", series_style)),
+        ];
+        Paragraph::new(text).render(area, buf);
+    }
+}
 fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
     frame.render_widget(Clear, rect);
 
     let active = app.state == State::FileExplorer;
-    let regions = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(rect);
-    let explorer = regions[0];
-    let content_view = regions[1];
+    // let regions = Layout::default()
+    //     .direction(Direction::Horizontal)
+    //     .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+    //     .split(rect);
+    // let explorer = regions[0];
+    // let content_view = regions[1];
 
-    let mode_view_width = app
-        .config
-        .modes
-        .iter()
-        .map(|mode| mode.label.chars().count() as u16)
-        .max()
-        .unwrap()
-        + 4;
-    let mode_view_height = app.config.modes.len() as u16 + 2;
-
-    let mode_view = Rect::new(
-        content_view.right() - mode_view_width,
-        content_view.bottom() - mode_view_height,
-        mode_view_width,
-        mode_view_height,
+    let target_view_width = std::cmp::max(
+        app.config
+            .targets
+            .iter()
+            .map(|mode| mode.label.chars().count() as u16)
+            .max()
+            .unwrap()
+            + 4,
+        10,
     );
+    let target_view_height = app.config.targets.len() as u16 + 2;
+
+    let target_view = Rect::new(
+        rect.right() - target_view_width,
+        rect.bottom() - target_view_height,
+        target_view_width,
+        target_view_height,
+    );
+    let mode_view = Rect::new(target_view.left() - 10, target_view.bottom() - 4, 10, 4);
 
     let dir_traverser = DirTraverser {
         state: &app.fe_state,
         active,
     };
-    let binding = app.fe_state.selection.as_ref().map(|(_, content)| content);
-    let content_viewer = ContentViewer {
-        content: binding,
+
+    // let binding = app.fe_state.selection.as_ref().map(|(_, content)| content);
+    // let content_viewer = ContentViewer {
+    //     content: binding,
+    //     active,
+    // };
+
+    let target_viewer = TargetViewer {
+        targets: &app.config.targets,
         active,
     };
-
     let mode_viewer = ModeViewer {
-        modes: &app.config.modes,
+        mode: &app.mode,
         active,
     };
 
-    frame.render_widget(dir_traverser, explorer);
-    frame.render_widget(content_viewer, content_view);
-
+    frame.render_widget(dir_traverser, rect);
+    // frame.render_widget(content_viewer, content_view);
+    frame.render_widget(target_viewer, target_view);
     frame.render_widget(mode_viewer, mode_view);
 }
 
