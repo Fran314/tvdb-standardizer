@@ -18,13 +18,6 @@ pub struct DirEntry {
 
 pub type DirContent = Vec<DirEntry>;
 
-// #[derive(Debug)]
-// pub enum SelectionContent {
-//     Dir(DirContent),
-//     Video(String),
-//     File,
-// }
-
 #[derive(Debug)]
 pub struct FileExplorerState {
     pub tree: Vec<(String, DirContent)>,
@@ -125,106 +118,9 @@ fn get_autoselect(content: &DirContent) -> WithMessages<Option<String>> {
                 .unwrap_or(first_entry);
 
             WithMessages::from_value(Some(selection.name.to_owned()))
-
-            // get_content(path, &selection.name, &selection.entry_type)
-            //     .map(|content| Some((selection.name.to_owned(), content)))
         }
     }
 }
-
-// fn get_content<P: AsRef<Path>>(
-//     base_path: P,
-//     name: &str,
-//     entry_type: &EntryType,
-// ) -> WithMessages<SelectionContent> {
-//     match entry_type {
-//         EntryType::Dir => read_dir(base_path.as_ref().join(name)).map(SelectionContent::Dir),
-//         EntryType::Video => WithMessages::from_value(SelectionContent::Video(
-//             movie_name_heuristics(name.to_owned()),
-//         )),
-//         EntryType::Unknown => WithMessages::from_value(SelectionContent::File),
-//     }
-// }
-
-// fn movie_name_heuristics(filename: String) -> String {
-//     let ignore = regex::Regex::new(
-//         &[
-//             "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
-//         ]
-//         .join("|"),
-//     )
-//     .unwrap();
-//     let split = regex::Regex::new(r"\.|\s").unwrap();
-//     let year = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-//
-//     let filename = ignore.replace_all(&filename, " ");
-//     let blocks = split.split(&filename);
-//
-//     let mut heuristic = String::new();
-//     for block in blocks.filter(|s| !s.is_empty()) {
-//         if year.is_match(block) {
-//             break;
-//         }
-//
-//         heuristic = heuristic + " " + block;
-//     }
-//     heuristic.trim().to_owned()
-// }
-
-// pub enum SearchParams {
-//     Movie {
-//         name: String,
-//         year: Option<u32>,
-//     },
-//     Series {
-//         name: String,
-//         year: Option<u32>,
-//         season: u32,
-//         episode: u32,
-//     },
-// }
-// fn new_movie_name_heuristics(filename: String) -> SearchParams {
-//     let split = regex::Regex::new(r"\.|\s").unwrap();
-//     let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-//     let season_regex = regex::Regex::new(r"[sS]\d*").unwrap();
-//     let episode_regex = regex::Regex::new(r"[eE]\d*").unwrap();
-//     let season_episode_regex = regex::Regex::new(r"[sS](\d*)\s*[eE](\d*)").unwrap();
-//
-//     let blocks = split.split(&filename);
-//     let year: Option<u32> = year_regex.find(&filename).map(|m| {
-//         m.as_str()
-//             .parse()
-//             .expect("failed to convert digit string to u32")
-//     });
-//     let mut name = String::new();
-//     for block in blocks.filter(|s| !s.is_empty()) {
-//         if year_regex.is_match(block)
-//             || season_regex.is_match(block)
-//             || episode_regex.is_match(block)
-//         {
-//             break;
-//         }
-//
-//         name = name + " " + block;
-//     }
-//     if let Some(captures) = season_episode_regex.captures(&filename) {
-//         let season: u32 = captures[1]
-//             .parse()
-//             .expect("failed to convert digit string to u32");
-//         let episode: u32 = captures[2]
-//             .parse()
-//             .expect("failed to convert digit string to u32");
-//
-//         SearchParams::Series {
-//             name,
-//             year,
-//             season,
-//             episode,
-//         }
-//     } else {
-//         SearchParams::Movie { name, year }
-//     }
-// }
 
 impl FileExplorerState {
     pub fn new() -> Result<(Self, Vec<Message>), Message> {
@@ -271,14 +167,6 @@ impl FileExplorerState {
         content
     }
 
-    // pub fn selection_entry(&self) -> Option<DirEntry> {
-    //     let name = self.selection.to_owned()?;
-    //     let content = self.curr_content();
-    //     content
-    //         .iter()
-    //         .find(|entry| entry.name == name)
-    //         .map(|entry| entry.to_owned())
-    // }
     pub fn selection_name_type(&self) -> Option<(String, EntryType)> {
         let name = self.selection.to_owned()?;
         let content = self.curr_content();
@@ -288,14 +176,6 @@ impl FileExplorerState {
             .map(|entry| entry.entry_type.to_owned())?;
         Some((name, entry_type))
     }
-    // pub fn selection_type(&self) -> Option<EntryType> {
-    //     let name = self.selection.to_owned()?;
-    //     let content = self.curr_content();
-    //     content
-    //         .iter()
-    //         .find(|entry| entry.name == name)
-    //         .map(|entry| entry.entry_type.to_owned())
-    // }
 
     pub fn enter_dir(&mut self) -> WithMessages<()> {
         let mut messages = Vec::new();

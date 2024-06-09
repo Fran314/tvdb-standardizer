@@ -7,7 +7,7 @@ pub struct Target {
 }
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
-    pub omdb_api_key: String,
+    pub tvdb_auth_token: String,
     pub storage_path: String,
     pub targets: Vec<Target>,
 }

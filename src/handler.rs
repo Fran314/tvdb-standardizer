@@ -28,14 +28,14 @@ pub fn handle_file_explorer_key_events(key_event: KeyEvent, app: &mut App) -> Ap
 pub fn handle_movie_selection_key_events(key_event: KeyEvent, app: &mut App) -> AppResult<()> {
     match key_event.code {
         KeyCode::Esc | KeyCode::Enter => app.state = State::FileExplorer,
-        KeyCode::Backspace => app.pop_search_string(),
-        KeyCode::Char(c) => app.append_to_search_string(c),
-        KeyCode::Up => app.prev_movie(),
-        KeyCode::Down => app.next_movie(),
-        // Counter handlers
-        KeyCode::Right => {}
-        KeyCode::Left => {}
-        // Other handlers you could add here.
+        KeyCode::Tab => app.ui_next(),
+        KeyCode::BackTab => app.ui_prev(),
+        KeyCode::Char(c) => app.ui_add(c),
+        KeyCode::Backspace => app.ui_remove(),
+        KeyCode::Left => app.ui_left(),
+        KeyCode::Right => app.ui_right(),
+        KeyCode::Up => app.select_prev(),
+        KeyCode::Down => app.select_next(),
         _ => {}
     }
     Ok(())

@@ -1,4 +1,4 @@
-use movie_mover::app::{App};
+use movie_mover::app::App;
 use movie_mover::event::{Event, EventHandler};
 use movie_mover::handler::handle_key_events;
 use movie_mover::tui::Tui;
@@ -39,5 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Exit the user interface.
     tui.exit()?;
+
     Ok(())
 }

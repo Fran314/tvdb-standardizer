@@ -1,39 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 use std::sync::{Arc, Mutex};
 
-#[derive(Serialize, Deserialize, Debug)]
-#[allow(non_snake_case)]
-pub struct MovieEntry {
-    pub Title: String,
-    pub Year: String,
-    pub imdbID: String,
-    pub Type: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[allow(non_snake_case)]
-pub struct APISearchResponse {
-    Response: String,
-
-    Search: Option<Vec<MovieEntry>>,
-    totalResults: Option<String>,
-
-    Error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[allow(non_snake_case)]
-pub struct APITitleResponse {
-    Response: String,
-
-    Title: Option<String>,
-    Year: Option<String>,
-    imdbID: Option<String>,
-    Type: Option<String>,
-
-    Error: Option<String>,
-}
+use super::tvdb;
 
 #[derive(Debug, PartialEq, Default)]
 pub enum Mode {
@@ -41,236 +8,348 @@ pub enum Mode {
     Movie,
     Series,
 }
-#[derive(Debug, Default)]
-pub struct QueryState {
-    pub mode: Mode,
-    pub search_string: String,
+
+#[derive(Debug)]
+pub struct MovieEntry {
+    pub name: String,
+    pub year: String,
+    pub tvdb_id: String,
+    pub imdb_id: String,
+}
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct MovieParams {
+    pub name: String,
+    pub year: String,
+}
+#[derive(Debug)]
+pub struct MovieQuerier {
+    pub query_params: MovieParams,
     pub entries: Arc<Mutex<Option<Vec<MovieEntry>>>>,
     pub selected: usize,
-    pub to_search_string: Arc<Mutex<Option<String>>>,
-
+    pub next_query: Arc<Mutex<Option<MovieParams>>>,
     pub running: Arc<Mutex<bool>>,
 }
+impl MovieParams {
+    pub fn new(filename: impl AsRef<str>) -> Self {
+        let ignore = regex::Regex::new(
+            &[
+                "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
+            ]
+            .join("|"),
+        )
+        .unwrap();
+        let split = regex::Regex::new(r"\.|\s").unwrap();
+        let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
 
-// fn fix_id(imdb_id: String) -> String {
-//     let Some(id) = imdb_id.strip_prefix("tt") else {
-//         return imdb_id;
-//     };
-//
-//     String::from("tt") + id.trim_start_matches('0')
-// }
-
-struct MovieParams {
-    name: String,
-    year: Option<u32>,
-}
-struct SeriesParams {
-    name: String,
-    year: Option<u32>,
-    season: Option<u32>,
-    episode: Option<u32>,
-}
-fn movie_params_heuristic(filename: String) -> MovieParams {
-    let split = regex::Regex::new(r"\.|\s").unwrap();
-    let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-
-    let blocks = split.split(&filename);
-    let year: Option<u32> = year_regex.find(&filename).map(|m| {
-        m.as_str()
-            .parse()
-            .expect("failed to convert digit string to u32")
-    });
-    let mut name = String::new();
-    for block in blocks.filter(|s| !s.is_empty()) {
-        if year_regex.is_match(block)
-        {
-            break;
-        }
-
-        name = name + " " + block;
-    }
-
-    MovieParams { name, year }
-}
-fn series_params_heuristic(filename: String) -> SeriesParams {
-    let split = regex::Regex::new(r"\.|\s").unwrap();
-    let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-    let season_regex = regex::Regex::new(r"[sS]\d*").unwrap();
-    let episode_regex = regex::Regex::new(r"[eE]\d*").unwrap();
-    let season_episode_regex = regex::Regex::new(r"[sS](\d*)\s*[eE](\d*)|(\d*)x(\d*)").unwrap();
-
-    let year: Option<u32> = year_regex.find(&filename).map(|m| {
-        m.as_str()
-            .parse()
-            .expect("failed to convert digit string to u32")
-    });
-    let (season, episode) = match season_episode_regex.captures(&filename) {
-        Some(captures) => {
-            let season: u32 = captures[1]
-                .parse()
-                .expect("failed to convert digit string to u32");
-            let episode: u32 = captures[2]
-                .parse()
-                .expect("failed to convert digit string to u32");
-
-            (Some(season), Some(episode))
-
-        },
-        None => (None, None)
-    };
-
-    let blocks = split.split(&filename);
-    let mut name = String::new();
-    for block in blocks.filter(|s| !s.is_empty()) {
-        if year_regex.is_match(block)
-            || season_regex.is_match(block)
-            || episode_regex.is_match(block)
-            || season_episode_regex.is_match(block)
-        {
-            break;
-        }
-
-        name = name + " " + block;
-    }
-    SeriesParams { name, year, season, episode }
-}
-
-
-pub async fn query_movie(omdb_api_key: String, search_string: String) -> Result<Vec<MovieEntry>, Box<dyn std::error::Error>> {
-    let re = regex::Regex::new(r"(.*)\((\d{4})\)").unwrap();
-
-    let res = match re.captures(&search_string) {
-        Some(c) => {
-            let title = &c[1].trim();
-            let year = &c[2];
-            let url = reqwest::Url::parse_with_params(
-                "http://www.omdbapi.com",
-                &[("apikey", omdb_api_key.as_str()), ("type", "movie"), ("t", title), ("y", year)],
-            )?;
-            let res: APITitleResponse = reqwest::get(url).await?.json().await?;
-
-            match res.Response.as_str() {
-                "True" => {
-                    vec![MovieEntry {
-                        Title: res.Title.ok_or("failed to get title")?,
-                        Year: res.Year.ok_or("failed to get year")?,
-                        // imdbID: fix_id(res.imdbID.ok_or("failed to get imdbID")?),
-                        imdbID: res.imdbID.ok_or("failed to get imdbID")?,
-                        Type: res.Type.ok_or("failed to get type")?,
-                    }]
-                },
-                _ => {Vec::new()}
+        let filename = ignore.replace_all(filename.as_ref(), " ");
+        let blocks = split.split(filename.as_ref());
+        let year = year_regex
+            .find(filename.as_ref())
+            .map(|m| m.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let mut name = String::new();
+        for block in blocks.filter(|s| !s.is_empty()) {
+            if year_regex.is_match(block) {
+                break;
             }
 
-        },
-        None => { 
-            let url = reqwest::Url::parse_with_params(
-                "http://www.omdbapi.com",
-                &[("apikey", omdb_api_key.as_str()), ("type", "movie"), ("s", search_string.as_str())],
-            )?;
-            let res: APISearchResponse = reqwest::get(url).await?.json().await?;
-            match res.Search {
-                // Some(s) => s.into_iter().map(|entry| MovieEntry { imdbID: fix_id(entry.imdbID), ..entry }).collect(),
-                Some(s) => s,
-                None => Vec::new(),
-            }
-        },
-    };
+            name = name + " " + block;
+        }
 
-    Ok(res)
+        Self {
+            name: name.trim().to_owned(),
+            year,
+        }
+    }
 }
-
-// pub async fn query_movie(omdb_api_key: String, search_string: String) -> Result<Vec<MovieEntry>, Box<dyn std::error::Error>> {
-//     let re = regex::Regex::new(r"(.*)\((\d{4})\)").unwrap();
-//
-//     let res = match re.captures(&search_string) {
-//         Some(c) => {
-//             let title = &c[1].trim();
-//             let year = &c[2];
-//             let url = reqwest::Url::parse_with_params(
-//                 "http://www.omdbapi.com",
-//                 &[("apikey", omdb_api_key.as_str()), ("type", "movie"), ("t", title), ("y", year)],
-//             )?;
-//             let res: APITitleResponse = reqwest::get(url).await?.json().await?;
-//
-//             match res.Response.as_str() {
-//                 "True" => {
-//                     vec![MovieEntry {
-//                         Title: res.Title.ok_or("failed to get title")?,
-//                         Year: res.Year.ok_or("failed to get year")?,
-//                         // imdbID: fix_id(res.imdbID.ok_or("failed to get imdbID")?),
-//                         imdbID: res.imdbID.ok_or("failed to get imdbID")?,
-//                         Type: res.Type.ok_or("failed to get type")?,
-//                     }]
-//                 },
-//                 _ => {Vec::new()}
-//             }
-//
-//         },
-//         None => { 
-//             let url = reqwest::Url::parse_with_params(
-//                 "http://www.omdbapi.com",
-//                 &[("apikey", omdb_api_key.as_str()), ("type", "movie"), ("s", search_string.as_str())],
-//             )?;
-//             let res: APISearchResponse = reqwest::get(url).await?.json().await?;
-//             match res.Search {
-//                 // Some(s) => s.into_iter().map(|entry| MovieEntry { imdbID: fix_id(entry.imdbID), ..entry }).collect(),
-//                 Some(s) => s,
-//                 None => Vec::new(),
-//             }
-//         },
-//     };
-//
-//     Ok(res)
-// }
-impl QueryState {
-    pub fn new(omdb_api_key: String) -> Self {
+impl MovieQuerier {
+    pub fn new(tvdb_auth_token: String) -> Self {
         let output = Self {
-            mode: Mode::Movie,
-            search_string: String::new(),
+            query_params: MovieParams::default(),
             entries: Arc::new(Mutex::new(Some(Vec::new()))),
             selected: 0,
-            to_search_string: Arc::new(Mutex::new(None)),
+            next_query: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(true)),
         };
 
-        let to_search_string = output.to_search_string.clone();
+        let next_query = output.next_query.clone();
         let entries = output.entries.clone();
-        let stop = output.running.clone();
+        let running = output.running.clone();
 
         tokio::spawn(async move {
-            while *stop.lock().unwrap() {
-                let to_search_string = to_search_string.lock().unwrap().take();
-
-                match to_search_string {
+            while *running.lock().unwrap() {
+                let next_query = next_query.lock().unwrap().take();
+                match next_query {
                     None => {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                    },
-                    Some(s) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    }
+                    Some(current_query) => {
                         {
                             *entries.lock().unwrap() = None;
                         }
-                        if let Ok(movies) = query_movie(omdb_api_key.clone(), s).await {
-                        *entries.lock().unwrap() = Some(movies);
-                    }},
+                        if let Ok(movies) = tvdb::api_search_movie(
+                            tvdb_auth_token.clone(),
+                            current_query.name,
+                            current_query.year,
+                        )
+                        .await
+                        {
+                            *entries.lock().unwrap() = Some(
+                                movies
+                                    .into_iter()
+                                    .map(|movie| MovieEntry {
+                                        name: movie.name,
+                                        year: movie.year,
+                                        tvdb_id: movie.tvdb_id,
+                                        imdb_id: movie.imdb_id,
+                                    })
+                                    .collect(),
+                            );
+                        }
+                    }
                 }
             }
         });
 
         output
     }
-    pub fn change_mode(&mut self) {
-        self.mode = match self.mode {
-            Mode::Movie => Mode::Series,
-            Mode::Series => Mode::Movie,
+
+    pub fn query_filename(&mut self, filename: impl AsRef<str>) {
+        self.query_params(MovieParams::new(filename));
+    }
+    pub fn query_params(&mut self, params: MovieParams) {
+        if params != self.query_params {
+            self.query_params = params;
+            self.selected = 0;
+            *self.next_query.lock().unwrap() = Some(self.query_params.clone());
         }
     }
-    pub fn query_movie(&mut self, search_string: String) {
-        if search_string != self.search_string {
-            self.selected = 0;
-            self.search_string = search_string.clone();
-            *self.to_search_string.lock().unwrap() = Some(search_string);
+
+    pub fn select_next(&mut self) {
+        let guard = self.entries.lock().unwrap();
+        if guard.is_some() {
+            let entries = guard.as_ref().unwrap();
+            if !entries.is_empty() {
+                self.selected = (self.selected + entries.len() + 1) % entries.len();
+            }
+        }
+    }
+    pub fn select_prev(&mut self) {
+        let guard = self.entries.lock().unwrap();
+        if guard.is_some() {
+            let entries = guard.as_ref().unwrap();
+            if !entries.is_empty() {
+                self.selected = (self.selected + entries.len() - 1) % entries.len();
+            }
+        }
+    }
+}
+impl Drop for MovieQuerier {
+    fn drop(&mut self) {
+        *self.running.lock().unwrap() = false;
+    }
+}
+
+#[derive(Debug)]
+pub struct EpisodeEntry {
+    pub show_name: String,
+    pub year: String,
+    pub tvdb_id: String,
+    pub imdb_id: String,
+    pub season: String,
+    pub episode: String,
+    pub episode_name: String,
+}
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct EpisodeParams {
+    pub name: String,
+    pub year: String,
+    pub season: String,
+    pub episode: String,
+}
+#[derive(Debug)]
+pub struct EpisodeQuerier {
+    pub query_params: EpisodeParams,
+    pub entries: Arc<Mutex<Option<Vec<EpisodeEntry>>>>,
+    pub selected: usize,
+    pub next_query: Arc<Mutex<Option<EpisodeParams>>>,
+    pub running: Arc<Mutex<bool>>,
+}
+
+impl EpisodeParams {
+    fn new(filename: impl AsRef<str>) -> Self {
+        let ignore = regex::Regex::new(
+            &[
+                "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
+            ]
+            .join("|"),
+        )
+        .unwrap();
+        let split = regex::Regex::new(r"\.|\s").unwrap();
+        let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
+        let season_regex = regex::Regex::new(r"[sS]\d*").unwrap();
+        let episode_regex = regex::Regex::new(r"[eE]\d*").unwrap();
+        let season_episode_regex = regex::Regex::new(r"[sS](\d*)\s*[eE](\d*)|(\d*)x(\d*)").unwrap();
+
+        let year = year_regex
+            .find(filename.as_ref())
+            .map(|m| m.as_str().to_owned())
+            .unwrap_or("".to_owned());
+        let (season, episode) = match season_episode_regex.captures(filename.as_ref()) {
+            Some(captures) => {
+                let season = captures[1]
+                    .parse::<u32>()
+                    .expect("failed to convert string of digits to numer")
+                    .to_string();
+                let episode = captures[1]
+                    .parse::<u32>()
+                    .expect("failed to convert string of digits to numer")
+                    .to_string();
+                (season, episode)
+            }
+            None => ("".to_owned(), "".to_owned()),
+        };
+
+        let filename = ignore.replace_all(filename.as_ref(), " ");
+        let blocks = split.split(filename.as_ref());
+        let mut name = String::new();
+        for block in blocks.filter(|s| !s.is_empty()) {
+            if year_regex.is_match(block)
+                || season_regex.is_match(block)
+                || episode_regex.is_match(block)
+                || season_episode_regex.is_match(block)
+            {
+                break;
+            }
+
+            name = name + " " + block;
+        }
+        Self {
+            name: name.trim().to_owned(),
+            year,
+            season,
+            episode,
+        }
+    }
+}
+impl EpisodeQuerier {
+    pub fn new(tvdb_auth_token: String) -> Self {
+        let output = Self {
+            query_params: EpisodeParams::default(),
+            entries: Arc::new(Mutex::new(Some(Vec::new()))),
+            selected: 0,
+            next_query: Arc::new(Mutex::new(None)),
+            running: Arc::new(Mutex::new(true)),
+        };
+
+        let next_query = output.next_query.clone();
+        let entries = output.entries.clone();
+        let running = output.running.clone();
+
+        tokio::spawn(async move {
+            while *running.lock().unwrap() {
+                let next_query = next_query.lock().unwrap().take();
+                match next_query {
+                    Some(current_query) => {
+                        {
+                            *entries.lock().unwrap() = None;
+                        }
+
+                        let Ok(series) = tvdb::api_search_series(tvdb_auth_token.clone(), current_query.name, current_query.year).await else {
+                            continue;
+                        };
+                        let output = futures::future::join_all(series.into_iter().map(|serie| async {
+                            let Ok(Some(name)) = tvdb::api_episode(tvdb_auth_token.clone(), serie.tvdb_id.clone(), current_query.season.clone(), current_query.episode.clone()).await else {
+                                return None;
+                            };
+                            Some(EpisodeEntry {
+                                show_name: serie.name,
+                                year: serie.year,
+                                tvdb_id: serie.tvdb_id,
+                                imdb_id: serie.imdb_id,
+                                season: current_query.season.clone(),
+                                episode: current_query.episode.clone(),
+                                episode_name: name
+                            })
+                        })).await.into_iter().flatten().collect();
+                        *entries.lock().unwrap() = Some(output);
+                    },
+                    None => {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    },
+                }
+
+            }
+        });
+
+        output
+    }
+
+    pub fn query_filename(&mut self, filename: impl AsRef<str>) {
+        let params = EpisodeParams::new(filename);
+        self.query_params(params);
+    }
+    pub fn query_params(&mut self, params: EpisodeParams) {
+        if params != self.query_params {
+            if self.query_params.name != params.name || self.query_params.year != params.year {
+                self.selected = 0;
+            }
+            self.query_params = params;
+            *self.next_query.lock().unwrap() = Some(self.query_params.clone());
+        }
+    }
+
+    pub fn select_next(&mut self) {
+        let guard = self.entries.lock().unwrap();
+        if guard.is_some() {
+            let entries = guard.as_ref().unwrap();
+            if !entries.is_empty() {
+                self.selected = (self.selected + entries.len() + 1) % entries.len();
+            }
+        }
+    }
+    pub fn select_prev(&mut self) {
+        let guard = self.entries.lock().unwrap();
+        if guard.is_some() {
+            let entries = guard.as_ref().unwrap();
+            if !entries.is_empty() {
+                self.selected = (self.selected + entries.len() - 1) % entries.len();
+            }
         }
     }
 }
 
+#[derive(Debug)]
+pub enum Querier {
+    MovieQuerier(MovieQuerier),
+    EpisodeQuerier(EpisodeQuerier),
+}
+impl Querier {
+    pub fn movie_querier(tvdb_auth_token: String) -> Self {
+        Self::MovieQuerier(MovieQuerier::new(tvdb_auth_token))
+    }
+    pub fn episode_querier(tvdb_auth_token: String) -> Self {
+        Self::EpisodeQuerier(EpisodeQuerier::new(tvdb_auth_token))
+    }
+
+    pub fn query_filename(&mut self, filename: impl AsRef<str>) {
+        match self {
+            Querier::MovieQuerier(movie_querier) => movie_querier.query_filename(filename),
+            Querier::EpisodeQuerier(episode_querier) => episode_querier.query_filename(filename),
+        }
+    }
+
+    pub fn select_next(&mut self) {
+        match self {
+            Querier::MovieQuerier(movie_querier) => movie_querier.select_next(),
+            Querier::EpisodeQuerier(episode_querier) => episode_querier.select_next(),
+        }
+    }
+    pub fn select_prev(&mut self) {
+        match self {
+            Querier::MovieQuerier(movie_querier) => movie_querier.select_prev(),
+            Querier::EpisodeQuerier(episode_querier) => episode_querier.select_prev(),
+        }
+    }
+}

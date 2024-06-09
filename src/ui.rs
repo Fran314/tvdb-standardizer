@@ -12,7 +12,10 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, DirContent, EntryType, FileExplorerState, Mode, QueryState, State},
+    app::{
+        App, DirContent, EntryType, EpisodeQuerier, FileExplorerState, Mode, MovieQuerier, Querier,
+        State, UIManager,
+    },
     config::Target,
     messenger::Urgency,
 };
@@ -182,54 +185,6 @@ impl<'a> Widget for DirTraverser<'a> {
     }
 }
 
-// pub struct ContentViewer<'a> {
-//     content: Option<&'a SelectionContent>,
-//     active: bool,
-// }
-//
-// impl<'a> Widget for ContentViewer<'a> {
-//     fn render(self, area: Rect, buf: &mut Buffer) {
-//         ratatui::widgets::Widget::render(Clear, area, buf);
-//
-//         let border_style = match self.active {
-//             true => Style::default(),
-//             false => Style::default().fg(Color::DarkGray),
-//         };
-//
-//         let area = surrounding_block(
-//             "selection content",
-//             Alignment::Center,
-//             border_style,
-//             area,
-//             buf,
-//         );
-//         match self.content {
-//             Some(SelectionContent::Dir(content)) => {
-//                 let dir_viewer = DirViewer {
-//                     content,
-//                     selection: None,
-//                     active: self.active,
-//                 };
-//
-//                 dir_viewer.render(area, buf);
-//             }
-//             Some(SelectionContent::Video(title)) => {
-//                 Paragraph::new(title.to_owned()).render(area, buf);
-//             }
-//             Some(_) => {
-//                 let dir_viewer = DirViewer {
-//                     content: &Vec::new(),
-//                     selection: None,
-//                     active: self.active,
-//                 };
-//
-//                 dir_viewer.render(area, buf);
-//             }
-//             None => {}
-//         }
-//     }
-// }
-
 pub struct TargetViewer<'a> {
     targets: &'a Vec<Target>,
     target: &'a String,
@@ -305,12 +260,6 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
     frame.render_widget(Clear, rect);
 
     let active = app.state == State::FileExplorer;
-    // let regions = Layout::default()
-    //     .direction(Direction::Horizontal)
-    //     .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-    //     .split(rect);
-    // let explorer = regions[0];
-    // let content_view = regions[1];
 
     let target_view_width = max(
         app.config
@@ -337,24 +286,23 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
         active,
     };
 
-    // let binding = app.fe_state.selection.as_ref().map(|(_, content)| content);
-    // let content_viewer = ContentViewer {
-    //     content: binding,
-    //     active,
-    // };
-
     let target_viewer = TargetViewer {
         targets: &app.config.targets,
         target: &app.target,
         active,
     };
-    let mode_viewer = ModeViewer {
-        mode: &app.query_state.mode,
-        active,
+    let mode_viewer = match app.query_state {
+        Querier::MovieQuerier(_) => ModeViewer {
+            mode: &Mode::Movie,
+            active,
+        },
+        Querier::EpisodeQuerier(_) => ModeViewer {
+            mode: &Mode::Series,
+            active,
+        },
     };
 
     frame.render_widget(dir_traverser, rect);
-    // frame.render_widget(content_viewer, content_view);
     frame.render_widget(target_viewer, target_view);
     frame.render_widget(mode_viewer, mode_view);
 }
@@ -375,12 +323,14 @@ pub fn spinner() -> String {
     }
 }
 
-pub struct SearchBar {
+pub struct Textarea {
     active: bool,
-    search_string: String,
+    cursor_index: usize,
+    label: String,
+    content: String,
 }
 
-impl Widget for SearchBar {
+impl Widget for Textarea {
     fn render(self, area: Rect, buf: &mut Buffer) {
         ratatui::widgets::Widget::render(Clear, area, buf);
 
@@ -393,16 +343,30 @@ impl Widget for SearchBar {
             false => Style::default().fg(Color::DarkGray),
         };
 
-        let area = surrounding_block("search bar", Alignment::Left, border_style, area, buf)
+        let area = surrounding_block(&self.label, Alignment::Left, border_style, area, buf)
             .inner(&Margin::new(2, 0));
-        Paragraph::new(self.search_string)
-            .set_style(text_style)
-            .render(area, buf);
+        let line = if !self.active {
+            Line::from(vec![Span::styled(&self.content, text_style)])
+        } else if self.cursor_index < self.content.len() {
+            let (before, after) = self.content.split_at(self.cursor_index);
+            let (c, after) = after.split_at(1);
+            Line::from(vec![
+                Span::styled(before, text_style),
+                Span::styled(c, text_style.underlined()),
+                Span::styled(after, text_style),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(&self.content, text_style),
+                Span::styled(" ", text_style.reversed()),
+            ])
+        };
+        Paragraph::new(line).set_style(text_style).render(area, buf);
     }
 }
 
 pub struct MoviePicker<'a> {
-    state: &'a QueryState,
+    state: &'a MovieQuerier,
     active: bool,
 }
 
@@ -436,10 +400,10 @@ impl<'a> Widget for MoviePicker<'a> {
                         .iter()
                         .map(|entry| {
                             Row::new(vec![
-                                Cell::from(String::from(" ") + entry.Title.as_str())
+                                Cell::from(String::from(" ") + entry.name.as_str())
                                     .style(Style::default().bold()),
-                                Cell::from(entry.Year.as_str()),
-                                Cell::from(entry.imdbID.as_str()),
+                                Cell::from(entry.year.as_str()),
+                                Cell::from(entry.imdb_id.as_str()),
                             ])
                             .style(default_style)
                         })
@@ -477,6 +441,85 @@ impl<'a> Widget for MoviePicker<'a> {
     }
 }
 
+pub struct EpisodePicker<'a> {
+    state: &'a EpisodeQuerier,
+    active: bool,
+}
+
+impl<'a> Widget for EpisodePicker<'a> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        ratatui::widgets::Widget::render(Clear, area, buf);
+
+        let mut table_state = TableState::default();
+        table_state.select(Some(self.state.selected));
+
+        let (default_style, highlight_style) = match self.active {
+            true => (
+                Style::default(),
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::REVERSED),
+            ),
+            false => (
+                Style::default().fg(Color::DarkGray),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::REVERSED),
+            ),
+        };
+
+        let entries = self.state.entries.lock().unwrap();
+        let (rows, mut table_state) = {
+            match entries.as_ref() {
+                Some(e) => {
+                    let rows: Vec<Row> = e
+                        .iter()
+                        .map(|entry| {
+                            Row::new(vec![
+                                Cell::from(String::from(" ") + entry.show_name.as_str())
+                                    .style(Style::default().bold()),
+                                Cell::from(entry.year.as_str()),
+                                Cell::from(entry.tvdb_id.as_str()),
+                                Cell::from(entry.imdb_id.as_str()),
+                                Cell::from(entry.episode_name.as_str()),
+                            ])
+                            .style(default_style)
+                        })
+                        .collect();
+                    let mut table_state = TableState::default();
+                    table_state.select(Some(self.state.selected));
+
+                    (rows, table_state)
+                }
+                None => {
+                    let rows = vec![Row::new(vec!["Loading ".to_string() + &spinner()])];
+
+                    let mut table_state = TableState::default();
+                    table_state.select(None);
+
+                    (rows, table_state)
+                }
+            }
+        };
+
+        let widths = [
+            Constraint::Length(area.width - 64),
+            Constraint::Length(8),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(20),
+        ];
+        let table = Table::new(rows, widths)
+            .header(
+                Row::new(vec!["Title", "Year", "tvdb ID", "imdb ID", "Episode"])
+                    .style(default_style.bold())
+                    .bottom_margin(1),
+            )
+            .highlight_style(highlight_style);
+
+        ratatui::widgets::StatefulWidget::render(table, area, buf, &mut table_state);
+    }
+}
 pub struct CascadingBlocks {
     blocks: Vec<(String, Style)>,
 
@@ -575,73 +618,150 @@ impl Widget for CascadingBlocks {
     }
 }
 
-fn movie_selection(app: &App, frame: &mut Frame, rect: Rect) {
+fn movie_selection(
+    active: bool,
+    ui_manager: &UIManager,
+    movie_querier: &MovieQuerier,
+    frame: &mut Frame,
+    rect: Rect,
+) {
     frame.render_widget(Clear, rect);
 
     let regions = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Length(rect.height - 3)])
         .split(rect);
+    let params_regions = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(regions[0]);
 
-    let search_bar = SearchBar {
-        active: app.state == State::MovieSelection,
-        search_string: app.query_state.search_string.to_owned(),
+    let name_textarea = Textarea {
+        active: active && ui_manager.selected == 0,
+        label: "Name".to_owned(),
+        cursor_index: ui_manager.cursor_position,
+        content: movie_querier.query_params.name.to_owned(),
+    };
+    let year_textarea = Textarea {
+        active: active && ui_manager.selected == 1,
+        label: "Year".to_owned(),
+        cursor_index: ui_manager.cursor_position,
+        content: movie_querier.query_params.year.to_owned(),
     };
     let movie_picker = MoviePicker {
-        active: app.state == State::MovieSelection,
-        state: &app.query_state,
+        active,
+        state: movie_querier,
     };
 
-    frame.render_widget(search_bar, regions[0]);
+    frame.render_widget(name_textarea, params_regions[0]);
+    frame.render_widget(year_textarea, params_regions[1]);
     frame.render_widget(movie_picker, regions[1]);
 }
+fn episode_selection(
+    active: bool,
+    ui_manager: &UIManager,
+    episode_querier: &EpisodeQuerier,
+    frame: &mut Frame,
+    rect: Rect,
+) {
+    frame.render_widget(Clear, rect);
 
-fn cheatsheet(commands: Vec<(&str, &str)>, active: bool, frame: &mut Frame, rect: Rect) {
-    if let Some((first_key, _)) = commands.first() {
-        frame.render_widget(Clear, rect);
+    let regions = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Length(rect.height - 3)])
+        .split(rect);
+    let params_regions = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(55),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+        ])
+        .split(regions[0]);
 
-        let (default_style, label_style) = match active {
-            true => (Style::default(), Style::default().fg(Color::Yellow).bold()),
-            false => (
-                Style::default().fg(Color::DarkGray),
-                Style::default().fg(Color::DarkGray).bold(),
-            ),
-        };
-        let width = commands
-            .iter()
-            .map(|(key, _)| key.chars().count())
-            .max()
-            .unwrap_or(first_key.chars().count()) as u16;
-        let rows = commands.into_iter().map(|(key, action)| {
-            Row::new(vec![
-                Cell::from(String::from(key) + ":").style(label_style),
-                Cell::from(action).style(default_style),
-            ])
-        });
+    let name_textarea = Textarea {
+        active: active && ui_manager.selected == 0,
+        label: "Name".to_owned(),
+        cursor_index: ui_manager.cursor_position,
+        content: episode_querier.query_params.name.to_owned(),
+    };
+    let year_textarea = Textarea {
+        active: active && ui_manager.selected == 1,
+        label: "Year".to_owned(),
+        cursor_index: ui_manager.cursor_position,
+        content: episode_querier.query_params.year.to_owned(),
+    };
+    let season_textarea = Textarea {
+        active: active && ui_manager.selected == 2,
+        label: "Season".to_owned(),
+        cursor_index: ui_manager.cursor_position,
+        content: episode_querier.query_params.season.to_owned(),
+    };
+    let episode_textarea = Textarea {
+        active: active && ui_manager.selected == 3,
+        label: "Episode".to_owned(),
+        cursor_index: ui_manager.cursor_position,
+        content: episode_querier.query_params.episode.to_owned(),
+    };
 
-        let widths = [
-            Constraint::Length(width + 1),
-            Constraint::Length(rect.width - width - 2),
-        ];
+    let movie_picker = EpisodePicker {
+        active,
+        state: episode_querier,
+    };
 
-        let table = Table::new(rows, widths).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(default_style)
-                .padding(Padding::horizontal(1)),
-        );
-
-        frame.render_widget(table, rect);
-    }
+    frame.render_widget(name_textarea, params_regions[0]);
+    frame.render_widget(year_textarea, params_regions[1]);
+    frame.render_widget(season_textarea, params_regions[2]);
+    frame.render_widget(episode_textarea, params_regions[3]);
+    frame.render_widget(movie_picker, regions[1]);
 }
+// fn cheatsheet(commands: Vec<(&str, &str)>, active: bool, frame: &mut Frame, rect: Rect) {
+//     if let Some((first_key, _)) = commands.first() {
+//         frame.render_widget(Clear, rect);
+//
+//         let (default_style, label_style) = match active {
+//             true => (Style::default(), Style::default().fg(Color::Yellow).bold()),
+//             false => (
+//                 Style::default().fg(Color::DarkGray),
+//                 Style::default().fg(Color::DarkGray).bold(),
+//             ),
+//         };
+//         let width = commands
+//             .iter()
+//             .map(|(key, _)| key.chars().count())
+//             .max()
+//             .unwrap_or(first_key.chars().count()) as u16;
+//         let rows = commands.into_iter().map(|(key, action)| {
+//             Row::new(vec![
+//                 Cell::from(String::from(key) + ":").style(label_style),
+//                 Cell::from(action).style(default_style),
+//             ])
+//         });
+//
+//         let widths = [
+//             Constraint::Length(width + 1),
+//             Constraint::Length(rect.width - width - 2),
+//         ];
+//
+//         let table = Table::new(rows, widths).block(
+//             Block::default()
+//                 .borders(Borders::ALL)
+//                 .border_type(BorderType::Rounded)
+//                 .border_style(default_style)
+//                 .padding(Padding::horizontal(1)),
+//         );
+//
+//         frame.render_widget(table, rect);
+//     }
+// }
 
 /// Renders the user interface widgets.
 pub fn render(app: &App, frame: &mut Frame) {
-    let width = std::cmp::min(frame.size().width, 100);
-    let height = std::cmp::min(frame.size().height, 40);
-    let x = (frame.size().width - width) / 2;
-    let y = (frame.size().height - height) / 2;
+    // let width = std::cmp::min(frame.size().width, 100);
+    // let height = std::cmp::min(frame.size().height, 40);
+    // let x = (frame.size().width - width) / 2;
+    // let y = (frame.size().height - height) / 2;
     // let rect = Rect::new(x, y, width, height);
     let rect = frame.size();
 
@@ -651,7 +771,22 @@ pub fn render(app: &App, frame: &mut Frame) {
         .split(rect);
 
     file_explorer(app, frame, layout[0]);
-    movie_selection(app, frame, layout[1]);
+    match &app.query_state {
+        Querier::MovieQuerier(movie_querier) => movie_selection(
+            app.state == State::MovieSelection,
+            &app.ui_manager,
+            movie_querier,
+            frame,
+            layout[1],
+        ),
+        Querier::EpisodeQuerier(episode_querier) => episode_selection(
+            app.state == State::MovieSelection,
+            &app.ui_manager,
+            episode_querier,
+            frame,
+            layout[1],
+        ),
+    }
 
     let messages = CascadingBlocks::new(
         app.messages
@@ -673,38 +808,38 @@ pub fn render(app: &App, frame: &mut Frame) {
     let messages_rect = Rect::new(0, 0, 28, layout[0].height);
     frame.render_widget(messages, messages_rect);
 
-    let cheatsheet_height = 4 + 2;
-    if y > cheatsheet_height {
-        let cheatsheet_area = Rect::new(
-            x,
-            frame.size().height - cheatsheet_height,
-            width,
-            cheatsheet_height,
-        );
-        let cheatsheet_rects = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(cheatsheet_area);
-
-        cheatsheet(
-            vec![
-                ("h/j/k/l", "move"),
-                ("<Enter>", "process selected file"),
-                ("s", "enter search mode"),
-                ("m", "cycle mode"),
-            ],
-            app.state == State::FileExplorer,
-            frame,
-            cheatsheet_rects[0],
-        );
-        cheatsheet(
-            vec![
-                ("↑/↓", "select title"),
-                ("<Esc/Enter>", "enter file explorer mode"),
-            ],
-            app.state == State::MovieSelection,
-            frame,
-            cheatsheet_rects[1],
-        );
-    }
+    // let cheatsheet_height = 4 + 2;
+    // if y > cheatsheet_height {
+    //     let cheatsheet_area = Rect::new(
+    //         x,
+    //         frame.size().height - cheatsheet_height,
+    //         width,
+    //         cheatsheet_height,
+    //     );
+    //     let cheatsheet_rects = Layout::default()
+    //         .direction(Direction::Horizontal)
+    //         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+    //         .split(cheatsheet_area);
+    //
+    //     cheatsheet(
+    //         vec![
+    //             ("h/j/k/l", "move"),
+    //             ("<Enter>", "process selected file"),
+    //             ("s", "enter search mode"),
+    //             ("m", "cycle mode"),
+    //         ],
+    //         app.state == State::FileExplorer,
+    //         frame,
+    //         cheatsheet_rects[0],
+    //     );
+    //     cheatsheet(
+    //         vec![
+    //             ("↑/↓", "select title"),
+    //             ("<Esc/Enter>", "enter file explorer mode"),
+    //         ],
+    //         app.state == State::MovieSelection,
+    //         frame,
+    //         cheatsheet_rects[1],
+    //     );
+    // }
 }
