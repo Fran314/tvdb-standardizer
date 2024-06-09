@@ -334,8 +334,9 @@ impl App {
                 let target_path = &self
                     .config
                     .targets
-                    .first()
-                    .expect("config must have targets")
+                    .iter()
+                    .find(|target| target.label == self.target)
+                    .expect("current target must be a config target")
                     .path;
                 let folder_path = std::path::PathBuf::from(target_path).join(&title);
                 let link_path = std::path::PathBuf::from(&folder_path).join(title + ".mkv");
@@ -402,8 +403,9 @@ impl App {
                 let target_path = &self
                     .config
                     .targets
-                    .first()
-                    .expect("config must have targets")
+                    .iter()
+                    .find(|target| target.label == self.target)
+                    .expect("current target must be a config target")
                     .path;
                 let show_folder_path = std::path::PathBuf::from(target_path).join(show_title);
                 let season_folder_path =
