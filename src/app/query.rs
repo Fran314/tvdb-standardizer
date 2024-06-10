@@ -190,7 +190,8 @@ impl EpisodeParams {
         let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
         let season_regex = regex::Regex::new(r"^[sS]\d\d*$").unwrap();
         let episode_regex = regex::Regex::new(r"^[eE]\d\d*$").unwrap();
-        let season_episode_regex = regex::Regex::new(r"[sS](\d\d*)\s*[eE](\d\d*)|(\d\d*)x(\d\d*)").unwrap();
+        let season_episode_regex =
+            regex::Regex::new(r"[sS](\d\d*)\s*[eE](\d\d*)|(\d\d*)x(\d\d*)").unwrap();
 
         let year = year_regex
             .find(filename.as_ref())
@@ -198,11 +199,17 @@ impl EpisodeParams {
             .unwrap_or("".to_owned());
         let (season, episode) = match season_episode_regex.captures(filename.as_ref()) {
             Some(captures) => {
-                let season = captures.get(1).unwrap_or(captures.get(3).expect("either group 1 or group 3 must have matched")).as_str()
+                let season = captures.get(1).or(captures.get(3));
+                let season = season
+                    .expect("either group 1 or group 3 must have matched")
+                    .as_str()
                     .parse::<u32>()
                     .expect("failed to convert string of digits to numer")
                     .to_string();
-                let episode = captures.get(2).unwrap_or(captures.get(4).expect("either group 2 or group 4 must have matched")).as_str()
+                let episode = captures.get(2).or(captures.get(4));
+                let episode = episode
+                    .expect("either group 2 or group 4 must have matched")
+                    .as_str()
                     .parse::<u32>()
                     .expect("failed to convert string of digits to numer")
                     .to_string();
