@@ -178,7 +178,7 @@ pub struct EpisodeQuerier {
 }
 
 impl EpisodeParams {
-    fn new(filename: impl AsRef<str>) -> Self {
+    pub fn new(filename: impl AsRef<str>) -> Self {
         let ignore = regex::Regex::new(
             &[
                 "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
@@ -188,9 +188,9 @@ impl EpisodeParams {
         .unwrap();
         let split = regex::Regex::new(r"\.|\s").unwrap();
         let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-        let season_regex = regex::Regex::new(r"[sS]\d*").unwrap();
-        let episode_regex = regex::Regex::new(r"[eE]\d*").unwrap();
-        let season_episode_regex = regex::Regex::new(r"[sS](\d*)\s*[eE](\d*)|(\d*)x(\d*)").unwrap();
+        let season_regex = regex::Regex::new(r"^[sS]\d\d*$").unwrap();
+        let episode_regex = regex::Regex::new(r"^[eE]\d\d*$").unwrap();
+        let season_episode_regex = regex::Regex::new(r"[sS](\d\d*)\s*[eE](\d\d*)|(\d\d*)x(\d\d*)").unwrap();
 
         let year = year_regex
             .find(filename.as_ref())
@@ -198,11 +198,11 @@ impl EpisodeParams {
             .unwrap_or("".to_owned());
         let (season, episode) = match season_episode_regex.captures(filename.as_ref()) {
             Some(captures) => {
-                let season = captures[1]
+                let season = captures.get(1).unwrap_or(captures.get(3).expect("either group 1 or group 3 must have matched")).as_str()
                     .parse::<u32>()
                     .expect("failed to convert string of digits to numer")
                     .to_string();
-                let episode = captures[1]
+                let episode = captures.get(2).unwrap_or(captures.get(4).expect("either group 2 or group 4 must have matched")).as_str()
                     .parse::<u32>()
                     .expect("failed to convert string of digits to numer")
                     .to_string();
@@ -287,8 +287,7 @@ impl EpisodeQuerier {
     }
 
     pub fn query_filename(&mut self, filename: impl AsRef<str>) {
-        let params = EpisodeParams::new(filename);
-        self.query_params(params);
+        self.query_params(EpisodeParams::new(filename));
     }
     pub fn query_params(&mut self, params: EpisodeParams) {
         if params != self.query_params {

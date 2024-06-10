@@ -10,7 +10,7 @@ mod tvdb;
 
 use crate::{config::Config, messenger::Message};
 
-pub use query::{EpisodeQuerier, MovieQuerier, Querier};
+pub use query::{EpisodeParams, EpisodeQuerier, MovieQuerier, Querier};
 
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
