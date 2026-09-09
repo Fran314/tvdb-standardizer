@@ -4,8 +4,6 @@ pub use fs::{DirContent, EntryType, FileExplorerState};
 
 mod query;
 
-pub use query::Mode;
-
 mod tvdb;
 
 use crate::{
@@ -346,7 +344,7 @@ impl App {
                     };
 
                     let re = regex::Regex::new(r"\((19\d\d|20\d\d)\)$").unwrap();
-                    let show_name = re.replace(&episode.show_name, "").trim().to_owned();
+                    let show_name = re.replace(&episode.series_name, "").trim().to_owned();
 
                     let show_title = format!(
                         "{} ({}) [tvdbid-{}]",

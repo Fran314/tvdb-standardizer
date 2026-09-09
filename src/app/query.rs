@@ -1,21 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use super::tvdb;
+use super::tvdb::{EpisodeEntry, MovieEntry, TvdbAPI};
 
-#[derive(Debug, PartialEq, Default)]
-pub enum Mode {
-    #[default]
-    Movie,
-    Series,
-}
-
-#[derive(Debug)]
-pub struct MovieEntry {
-    pub name: String,
-    pub year: String,
-    pub tvdb_id: String,
-    pub imdb_id: String,
-}
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct MovieParams {
     pub name: String,
@@ -72,6 +58,7 @@ impl MovieQuerier {
             next_query: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(true)),
         };
+        let tvdb_api = TvdbAPI::new(tvdb_auth_token);
 
         let next_query = output.next_query.clone();
         let entries = output.entries.clone();
@@ -88,24 +75,11 @@ impl MovieQuerier {
                         {
                             *entries.lock().unwrap() = None;
                         }
-                        if let Ok(movies) = tvdb::api_search_movie(
-                            tvdb_auth_token.clone(),
-                            current_query.name,
-                            current_query.year,
-                        )
-                        .await
+                        if let Ok(movies) = tvdb_api
+                            .search_movie(current_query.name, current_query.year)
+                            .await
                         {
-                            *entries.lock().unwrap() = Some(
-                                movies
-                                    .into_iter()
-                                    .map(|movie| MovieEntry {
-                                        name: movie.name,
-                                        year: movie.year,
-                                        tvdb_id: movie.tvdb_id,
-                                        imdb_id: movie.imdb_id,
-                                    })
-                                    .collect(),
-                            );
+                            *entries.lock().unwrap() = Some(movies);
                         }
                     }
                 }
@@ -151,16 +125,6 @@ impl Drop for MovieQuerier {
     }
 }
 
-#[derive(Debug)]
-pub struct EpisodeEntry {
-    pub show_name: String,
-    pub year: String,
-    pub tvdb_id: String,
-    pub imdb_id: String,
-    pub season: String,
-    pub episode: String,
-    pub episode_name: String,
-}
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct EpisodeParams {
     pub name: String,
@@ -249,6 +213,7 @@ impl EpisodeQuerier {
             next_query: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(true)),
         };
+        let tvdb_api = TvdbAPI::new(tvdb_auth_token);
 
         let next_query = output.next_query.clone();
         let entries = output.entries.clone();
@@ -262,31 +227,22 @@ impl EpisodeQuerier {
                         {
                             *entries.lock().unwrap() = None;
                         }
-
-                        let Ok(series) = tvdb::api_search_series(tvdb_auth_token.clone(), current_query.name, current_query.year).await else {
-                            continue;
-                        };
-                        let output = futures::future::join_all(series.into_iter().map(|serie| async {
-                            let Ok(Some(name)) = tvdb::api_episode(tvdb_auth_token.clone(), serie.tvdb_id.clone(), current_query.season.clone(), current_query.episode.clone()).await else {
-                                return None;
-                            };
-                            Some(EpisodeEntry {
-                                show_name: serie.name,
-                                year: serie.year,
-                                tvdb_id: serie.tvdb_id,
-                                imdb_id: serie.imdb_id,
-                                season: current_query.season.clone(),
-                                episode: current_query.episode.clone(),
-                                episode_name: name
-                            })
-                        })).await.into_iter().flatten().collect();
-                        *entries.lock().unwrap() = Some(output);
-                    },
+                        if let Ok(episodes) = tvdb_api
+                            .search_episodes(
+                                current_query.name,
+                                current_query.year,
+                                current_query.season,
+                                current_query.episode,
+                            )
+                            .await
+                        {
+                            *entries.lock().unwrap() = Some(episodes);
+                        }
+                    }
                     None => {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                    },
+                    }
                 }
-
             }
         });
 

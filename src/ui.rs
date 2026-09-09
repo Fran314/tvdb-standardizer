@@ -13,7 +13,7 @@ use ratatui::{
 
 use crate::{
     app::{
-        App, DirContent, EntryType, EpisodeQuerier, FileExplorerState, Mode, MovieQuerier, Querier,
+        App, DirContent, EntryType, EpisodeQuerier, FileExplorerState, MovieQuerier, Querier,
         State, UIManager,
     },
     config::Target,
@@ -226,6 +226,12 @@ impl<'a> Widget for TargetViewer<'a> {
         Paragraph::new(text).render(area, buf);
     }
 }
+
+pub enum Mode {
+    Movie,
+    Episode,
+}
+
 pub struct ModeViewer<'a> {
     mode: &'a Mode,
     active: bool,
@@ -247,13 +253,13 @@ impl<'a> Widget for ModeViewer<'a> {
         let area = surrounding_block("mode", Alignment::Center, default_style, area, buf)
             .inner(&Margin::new(1, 0));
 
-        let (movie_style, series_style) = match mode {
+        let (movie_style, episode_style) = match mode {
             Mode::Movie => (selected_style, default_style),
-            Mode::Series => (default_style, selected_style),
+            Mode::Episode => (default_style, selected_style),
         };
         let text = vec![
             Line::from(Span::styled("Movie", movie_style)),
-            Line::from(Span::styled("Series", series_style)),
+            Line::from(Span::styled("Episode", episode_style)),
         ];
         Paragraph::new(text).render(area, buf);
     }
@@ -299,7 +305,7 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
             active,
         },
         Querier::EpisodeQuerier(_) => ModeViewer {
-            mode: &Mode::Series,
+            mode: &Mode::Episode,
             active,
         },
     };
@@ -477,7 +483,7 @@ impl<'a> Widget for EpisodePicker<'a> {
                         .iter()
                         .map(|entry| {
                             Row::new(vec![
-                                Cell::from(String::from(" ") + entry.show_name.as_str())
+                                Cell::from(String::from(" ") + entry.series_name.as_str())
                                     .style(Style::default().bold()),
                                 Cell::from(entry.year.as_str()),
                                 Cell::from(entry.tvdb_id.as_str()),
