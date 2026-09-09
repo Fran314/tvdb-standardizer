@@ -287,7 +287,7 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
         target_view_width,
         target_view_height,
     );
-    let mode_view = Rect::new(target_view.left() - 10, target_view.bottom() - 4, 10, 4);
+    let mode_view = Rect::new(target_view.left() - 11, target_view.bottom() - 4, 11, 4);
 
     let dir_traverser = DirTraverser {
         state: &app.fe_state,
@@ -774,7 +774,7 @@ pub fn render(app: &App, frame: &mut Frame) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(rect);
 
     file_explorer(app, frame, layout[0]);
