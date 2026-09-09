@@ -329,7 +329,7 @@ impl App {
                     std::path::PathBuf::from("/storage").join(subpath)
                 };
 
-                let (show_title, season_title, episode_title) = {
+                let (series_title, season_title, episode_title) = {
                     let entries_guard = episode_querier.entries.lock().unwrap();
                     let Some(entries) = entries_guard.as_ref() else {
                         return Err(Message::error(
@@ -343,23 +343,26 @@ impl App {
                         ));
                     };
 
-                    let re = regex::Regex::new(r"\((19\d\d|20\d\d)\)$").unwrap();
-                    let show_name = re.replace(&episode.series_name, "").trim().to_owned();
+                    let series_name_and_year = {
+                        let re = regex::Regex::new(r"\((19\d\d|20\d\d)\)$").unwrap();
+                        if re.is_match(&episode.series_name) {
+                            episode.series_name.to_owned()
+                        } else {
+                            format!("{} ({})", episode.series_name, episode.year)
+                        }
+                    };
 
-                    let show_title = format!(
-                        "{} ({}) [tvdbid-{}]",
-                        show_name, episode.year, episode.tvdb_id
-                    );
-                    let season_title = format!("Season {}", episode.season);
+                    let series_title =
+                        format!("{} [tvdbid-{}]", series_name_and_year, episode.tvdb_id);
+                    let season_title = match episode.season.parse() {
+                        Ok(0) => "Specials".to_owned(),
+                        _ => format!("Season {}", episode.season),
+                    };
                     let episode_title = format!(
-                        "{} ({}) - S{:0>2}E{:0>2} - {}.mkv",
-                        show_name,
-                        episode.year,
-                        episode.season,
-                        episode.episode,
-                        episode.episode_name,
+                        "{} - S{:0>2}E{:0>2} - {}.mkv",
+                        series_name_and_year, episode.season, episode.episode, episode.episode_name,
                     );
-                    (show_title, season_title, episode_title)
+                    (series_title, season_title, episode_title)
                 };
 
                 let target_path = &self
@@ -369,23 +372,26 @@ impl App {
                     .find(|target| target.label == self.target)
                     .expect("current target must be a config target")
                     .path;
-                let show_folder_path = std::path::PathBuf::from(target_path).join(show_title);
+                let series_folder_path = std::path::PathBuf::from(target_path).join(series_title);
                 let season_folder_path =
-                    std::path::PathBuf::from(&show_folder_path).join(season_title);
+                    std::path::PathBuf::from(&series_folder_path).join(season_title);
                 let episode_path =
                     std::path::PathBuf::from(&season_folder_path).join(episode_title);
 
-                if !show_folder_path.exists() {
-                    std::fs::create_dir(show_folder_path)
-                        .map_err(|err| Message::error(format!("cannot process object: {err}")))?;
+                if !series_folder_path.exists() {
+                    std::fs::create_dir(series_folder_path).map_err(|err| {
+                        Message::error(format!("cannot process object, series folder error: {err}"))
+                    })?;
                 }
                 if !season_folder_path.exists() {
-                    std::fs::create_dir(season_folder_path)
-                        .map_err(|err| Message::error(format!("cannot process object: {err}")))?;
+                    std::fs::create_dir(season_folder_path).map_err(|err| {
+                        Message::error(format!("cannot process object, season folder error: {err}"))
+                    })?;
                 }
 
-                std::os::unix::fs::symlink(endpoint_path, episode_path)
-                    .map_err(|err| Message::error(format!("cannot process object: {err}")))?;
+                std::os::unix::fs::symlink(endpoint_path, &episode_path).map_err(|err| {
+                    Message::error(format!("cannot process object, symlink error: {err:?}"))
+                })?;
 
                 Ok(())
             }
