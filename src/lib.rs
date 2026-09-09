@@ -1,5 +1,6 @@
 pub mod config;
 pub mod messenger;
+pub mod utils;
 
 pub mod event;
 pub mod handler;

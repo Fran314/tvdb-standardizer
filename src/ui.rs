@@ -18,6 +18,7 @@ use crate::{
     },
     config::Target,
     messenger::Urgency,
+    utils::CharWise,
 };
 
 fn surrounding_block(
@@ -27,7 +28,8 @@ fn surrounding_block(
     area: Rect,
     buf: &mut Buffer,
 ) -> Rect {
-    let title = match title.chars().count() as u16 + 2 > area.width - 2 {
+    // TODO maybe implement CharWise for &str too so that I don't have to put to_owned here
+    let title = match title.to_owned().char_len() as u16 + 2 > area.width - 2 {
         false => String::from(title),
         true => {
             title
@@ -265,7 +267,7 @@ fn file_explorer(app: &App, frame: &mut Frame, rect: Rect) {
         app.config
             .targets
             .iter()
-            .map(|mode| mode.label.chars().count() as u16)
+            .map(|mode| mode.label.char_len() as u16)
             .max()
             .unwrap()
             + 4,
@@ -347,12 +349,11 @@ impl Widget for Textarea {
             .inner(&Margin::new(2, 0));
         let line = if !self.active {
             Line::from(vec![Span::styled(&self.content, text_style)])
-        } else if self.cursor_index < self.content.len() {
-            let (before, after) = self.content.split_at(self.cursor_index);
-            let (c, after) = after.split_at(1);
+        } else if self.cursor_index < self.content.char_len() {
+            let (before, ch, after) = self.content.char_split_at(self.cursor_index);
             Line::from(vec![
                 Span::styled(before, text_style),
-                Span::styled(c, text_style.underlined()),
+                Span::styled(ch, text_style.underlined()),
                 Span::styled(after, text_style),
             ])
         } else {

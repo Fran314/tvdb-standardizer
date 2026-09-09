@@ -8,7 +8,11 @@ pub use query::Mode;
 
 mod tvdb;
 
-use crate::{config::Config, messenger::Message};
+use crate::{
+    config::Config,
+    messenger::Message,
+    utils::{u8_mod, usize_clamp, CharWise},
+};
 
 pub use query::{EpisodeParams, EpisodeQuerier, MovieQuerier, Querier};
 
@@ -27,95 +31,51 @@ pub struct UIManager {
 }
 
 impl UIManager {
-    fn clamp(min: usize, val: i16, max: usize) -> usize {
-        if val <= min as i16 {
-            min
-        } else if val >= max as i16 {
-            max
-        } else {
-            val.try_into().expect("clamped i8 must be valid usize")
-        }
-    }
-
     pub fn new(querier: &Querier) -> Self {
         match querier {
             Querier::MovieQuerier(movie_querier) => Self {
                 selected: 0,
-                cursor_position: movie_querier.query_params.name.len(),
+                cursor_position: movie_querier.query_params.name.char_len(),
             },
             Querier::EpisodeQuerier(episode_querier) => Self {
                 selected: 0,
-                cursor_position: episode_querier.query_params.name.len(),
+                cursor_position: episode_querier.query_params.name.char_len(),
             },
         }
     }
     pub fn set_selected(&mut self, new_selected: impl Into<i16>, querier: &Querier) {
         match querier {
-            Querier::MovieQuerier(_) => {
-                self.selected = ((new_selected.into() + 2) % 2)
-                    .try_into()
-                    .expect("modulo operator should always be positive")
+            Querier::MovieQuerier(_) => self.selected = u8_mod(new_selected.into(), 2),
+            Querier::EpisodeQuerier(_) => self.selected = u8_mod(new_selected.into(), 4),
+        }
+    }
+    fn get_max_position(&self, querier: &Querier) -> usize {
+        match querier {
+            Querier::MovieQuerier(movie_querier) => {
+                if self.selected == 0 {
+                    movie_querier.query_params.name.char_len()
+                } else {
+                    movie_querier.query_params.year.char_len()
+                }
             }
-            Querier::EpisodeQuerier(_) => {
-                self.selected = ((new_selected.into() + 4) % 4)
-                    .try_into()
-                    .expect("modulo operator should always be positive")
+            Querier::EpisodeQuerier(episode_querier) => {
+                if self.selected == 0 {
+                    episode_querier.query_params.name.char_len()
+                } else if self.selected == 1 {
+                    episode_querier.query_params.year.char_len()
+                } else if self.selected == 2 {
+                    episode_querier.query_params.season.char_len()
+                } else {
+                    episode_querier.query_params.episode.char_len()
+                }
             }
         }
     }
     pub fn cursor_end(&mut self, querier: &Querier) {
-        match querier {
-            Querier::MovieQuerier(movie_querier) => {
-                if self.selected == 0 {
-                    self.cursor_position = movie_querier.query_params.name.len()
-                } else if self.selected == 1 {
-                    self.cursor_position = movie_querier.query_params.year.len()
-                }
-            }
-            Querier::EpisodeQuerier(episode_querier) => {
-                if self.selected == 0 {
-                    self.cursor_position = episode_querier.query_params.name.len()
-                } else if self.selected == 1 {
-                    self.cursor_position = episode_querier.query_params.year.len()
-                } else if self.selected == 2 {
-                    self.cursor_position = episode_querier.query_params.season.len()
-                } else if self.selected == 3 {
-                    self.cursor_position = episode_querier.query_params.episode.len()
-                }
-            }
-        }
+        self.cursor_position = self.get_max_position(querier);
     }
     pub fn set_cursor(&mut self, new_selected: impl Into<i16>, querier: &Querier) {
-        let new_selected = new_selected.into();
-        match querier {
-            Querier::MovieQuerier(movie_querier) => {
-                if self.selected == 0 {
-                    self.cursor_position =
-                        UIManager::clamp(0, new_selected, movie_querier.query_params.name.len())
-                } else if self.selected == 1 {
-                    self.cursor_position =
-                        UIManager::clamp(0, new_selected, movie_querier.query_params.year.len())
-                }
-            }
-            Querier::EpisodeQuerier(episode_querier) => {
-                if self.selected == 0 {
-                    self.cursor_position =
-                        UIManager::clamp(0, new_selected, episode_querier.query_params.name.len())
-                } else if self.selected == 1 {
-                    self.cursor_position =
-                        UIManager::clamp(0, new_selected, episode_querier.query_params.year.len())
-                } else if self.selected == 2 {
-                    self.cursor_position =
-                        UIManager::clamp(0, new_selected, episode_querier.query_params.season.len())
-                } else if self.selected == 3 {
-                    self.cursor_position = UIManager::clamp(
-                        0,
-                        new_selected,
-                        episode_querier.query_params.episode.len(),
-                    )
-                }
-            }
-        }
+        self.cursor_position = usize_clamp(0, new_selected.into(), self.get_max_position(querier));
     }
 }
 
@@ -222,22 +182,26 @@ impl App {
             Querier::MovieQuerier(movie_querier) => {
                 let mut params = movie_querier.query_params.clone();
                 if self.ui_manager.selected == 0 {
-                    params.name.insert(self.ui_manager.cursor_position, c);
+                    params.name.char_insert(self.ui_manager.cursor_position, c);
                 } else if self.ui_manager.selected == 1 {
-                    params.year.insert(self.ui_manager.cursor_position, c);
+                    params.year.char_insert(self.ui_manager.cursor_position, c);
                 }
                 movie_querier.query_params(params);
             }
             Querier::EpisodeQuerier(episode_querier) => {
                 let mut params = episode_querier.query_params.clone();
                 if self.ui_manager.selected == 0 {
-                    params.name.insert(self.ui_manager.cursor_position, c);
+                    params.name.char_insert(self.ui_manager.cursor_position, c);
                 } else if self.ui_manager.selected == 1 {
-                    params.year.insert(self.ui_manager.cursor_position, c);
+                    params.year.char_insert(self.ui_manager.cursor_position, c);
                 } else if self.ui_manager.selected == 2 {
-                    params.season.insert(self.ui_manager.cursor_position, c);
+                    params
+                        .season
+                        .char_insert(self.ui_manager.cursor_position, c);
                 } else if self.ui_manager.selected == 3 {
-                    params.episode.insert(self.ui_manager.cursor_position, c);
+                    params
+                        .episode
+                        .char_insert(self.ui_manager.cursor_position, c);
                 }
                 episode_querier.query_params(params);
             }
@@ -253,22 +217,22 @@ impl App {
             Querier::MovieQuerier(movie_querier) => {
                 let mut params = movie_querier.query_params.clone();
                 if self.ui_manager.selected == 0 {
-                    params.name.remove(remove_index);
+                    params.name.char_remove(remove_index);
                 } else if self.ui_manager.selected == 1 {
-                    params.year.remove(remove_index);
+                    params.year.char_remove(remove_index);
                 }
                 movie_querier.query_params(params);
             }
             Querier::EpisodeQuerier(episode_querier) => {
                 let mut params = episode_querier.query_params.clone();
                 if self.ui_manager.selected == 0 {
-                    params.name.remove(remove_index);
+                    params.name.char_remove(remove_index);
                 } else if self.ui_manager.selected == 1 {
-                    params.year.remove(remove_index);
+                    params.year.char_remove(remove_index);
                 } else if self.ui_manager.selected == 2 {
-                    params.season.remove(remove_index);
+                    params.season.char_remove(remove_index);
                 } else if self.ui_manager.selected == 3 {
-                    params.episode.remove(remove_index);
+                    params.episode.char_remove(remove_index);
                 }
                 episode_querier.query_params(params);
             }
