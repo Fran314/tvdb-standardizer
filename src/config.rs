@@ -1,5 +1,3 @@
-// use std::collections::VecDeque;
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Target {
     pub label: String,
@@ -14,7 +12,7 @@ pub struct Config {
 
 pub fn read_config() -> Result<Config, Box<dyn std::error::Error>> {
     let config_path = (dirs::config_dir().ok_or("couldn't find config dir")?)
-        .join("movie-mover")
+        .join("tvdb-standardizer")
         .join("config.toml");
     let mut file = std::fs::File::open(config_path)?;
     let config_contents = {

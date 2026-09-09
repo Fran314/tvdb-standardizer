@@ -1,11 +1,10 @@
-use movie_mover::app::App;
-use movie_mover::event::{Event, EventHandler};
-use movie_mover::handler::handle_key_events;
-use movie_mover::tui::Tui;
-use std::io;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
-
+use std::io;
+use tvdb_standardizer::app::App;
+use tvdb_standardizer::event::{Event, EventHandler};
+use tvdb_standardizer::handler::handle_key_events;
+use tvdb_standardizer::tui::Tui;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // save_config()?;
     // panic!();
 
-    let config = movie_mover::config::read_config()?;
+    let config = tvdb_standardizer::config::read_config()?;
     let mut app = App::new(config).map_err(|err| err.content)?;
 
     // Initialize the terminal user interface.
