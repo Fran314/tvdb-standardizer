@@ -1,6 +1,92 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use super::tvdb::{EpisodeEntry, MovieEntry, TvdbAPI};
+
+fn remove_ignored(text: impl AsRef<str>) -> String {
+    let ignore_regex = String::from("(?i)")
+        + &[
+            "\\.mkv$", "\\.mp4$", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160", "BluRay",
+        ]
+        .join("|");
+    let ignore_regex = regex::Regex::new(&ignore_regex).unwrap();
+    ignore_regex.replace_all(text.as_ref(), "").to_string()
+}
+fn dots_to_spaces(text: impl AsRef<str>) -> String {
+    let dot_regex = regex::Regex::new(r"\.").unwrap();
+    dot_regex.replace_all(text.as_ref(), " ").to_string()
+}
+fn get_year(text: impl AsRef<str>) -> String {
+    let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
+    year_regex
+        .find(text.as_ref())
+        .map(|m| m.as_str().to_owned())
+        .unwrap_or("".to_owned())
+}
+fn before_year(text: impl AsRef<str>) -> String {
+    let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
+    let res = year_regex
+        .split(text.as_ref())
+        .next()
+        .expect("result of split cannot be empty")
+        .to_string();
+    res
+}
+fn get_season_episode(text: impl AsRef<str>) -> (String, String) {
+    let season_episode_regex = regex::Regex::new(r"[sS](\d+)\s*[eE](\d+)|(\d+)[xX](\d+)").unwrap();
+    match season_episode_regex.captures(text.as_ref()) {
+        Some(captures) => {
+            let season = captures.get(1).or(captures.get(3));
+            let season = season
+                .expect("either group 1 or group 3 must have matched")
+                .as_str()
+                .parse::<u32>()
+                .expect("failed to convert string of digits to numer")
+                .to_string();
+            let episode = captures.get(2).or(captures.get(4));
+            let episode = episode
+                .expect("either group 2 or group 4 must have matched")
+                .as_str()
+                .parse::<u32>()
+                .expect("failed to convert string of digits to numer")
+                .to_string();
+            (season, episode)
+        }
+        None => ("".to_owned(), "".to_owned()),
+    }
+}
+fn before_season_episode(text: impl AsRef<str>) -> String {
+    let season_episode_regex = regex::Regex::new(r"[sS](\d+)\s*[eE](\d+)|(\d+)[xX](\d+)").unwrap();
+    let res = season_episode_regex
+        .split(text.as_ref())
+        .next()
+        .expect("result of split cannot be empty")
+        .to_string();
+    res
+}
+fn alphanumerical_only(text: impl AsRef<str>) -> String {
+    let non_alphanumerical = regex::Regex::new(r"[\W_]+").unwrap();
+    non_alphanumerical
+        .replace_all(text.as_ref(), " ")
+        .to_string()
+}
+fn simplify_whitespaces(text: impl AsRef<str>) -> String {
+    let whitspaces = regex::Regex::new(r"\s+").unwrap();
+    whitspaces
+        .replace_all(text.as_ref(), " ")
+        .trim()
+        .to_string()
+}
+fn extract_prefix(filename: impl AsRef<str>) -> String {
+    let filename = remove_ignored(filename);
+    let filename = dots_to_spaces(filename);
+    let filename = before_season_episode(filename);
+    let filename = before_year(filename);
+    let filename = alphanumerical_only(filename);
+    simplify_whitespaces(filename)
+}
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct MovieParams {
@@ -17,35 +103,9 @@ pub struct MovieQuerier {
 }
 impl MovieParams {
     pub fn new(filename: impl AsRef<str>) -> Self {
-        let ignore = regex::Regex::new(
-            &[
-                "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
-            ]
-            .join("|"),
-        )
-        .unwrap();
-        let split = regex::Regex::new(r"\.|\s").unwrap();
-        let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-
-        let filename = ignore.replace_all(filename.as_ref(), " ");
-        let blocks = split.split(filename.as_ref());
-        let year = year_regex
-            .find(filename.as_ref())
-            .map(|m| m.as_str())
-            .unwrap_or("")
-            .to_owned();
-        let mut name = String::new();
-        for block in blocks.filter(|s| !s.is_empty()) {
-            if year_regex.is_match(block) {
-                break;
-            }
-
-            name = name + " " + block;
-        }
-
         Self {
-            name: name.trim().to_owned(),
-            year,
+            name: extract_prefix(&filename),
+            year: get_year(&filename),
         }
     }
 }
@@ -134,70 +194,26 @@ pub struct EpisodeParams {
 }
 #[derive(Debug)]
 pub struct EpisodeQuerier {
+    current_prefix: String,
+    dictionary: HashMap<String, (String, String)>,
     pub query_params: EpisodeParams,
     pub entries: Arc<Mutex<Option<Vec<EpisodeEntry>>>>,
     pub selected: usize,
-    pub next_query: Arc<Mutex<Option<EpisodeParams>>>,
-    pub running: Arc<Mutex<bool>>,
+    next_query: Arc<Mutex<Option<EpisodeParams>>>,
+    running: Arc<Mutex<bool>>,
 }
 
 impl EpisodeParams {
-    pub fn new(filename: impl AsRef<str>) -> Self {
-        let ignore = regex::Regex::new(
-            &[
-                "\\.mkv", "1080p", "2160p", "h265", "h264", "4k", "1080", "2160",
-            ]
-            .join("|"),
-        )
-        .unwrap();
-        let split = regex::Regex::new(r"\.|\s").unwrap();
-        let year_regex = regex::Regex::new(r"19\d\d|20\d\d").unwrap();
-        let season_regex = regex::Regex::new(r"^[sS]\d\d*$").unwrap();
-        let episode_regex = regex::Regex::new(r"^[eE]\d\d*$").unwrap();
-        let season_episode_regex =
-            regex::Regex::new(r"[sS](\d\d*)\s*[eE](\d\d*)|(\d\d*)x(\d\d*)").unwrap();
-
-        let year = year_regex
-            .find(filename.as_ref())
-            .map(|m| m.as_str().to_owned())
-            .unwrap_or("".to_owned());
-        let (season, episode) = match season_episode_regex.captures(filename.as_ref()) {
-            Some(captures) => {
-                let season = captures.get(1).or(captures.get(3));
-                let season = season
-                    .expect("either group 1 or group 3 must have matched")
-                    .as_str()
-                    .parse::<u32>()
-                    .expect("failed to convert string of digits to numer")
-                    .to_string();
-                let episode = captures.get(2).or(captures.get(4));
-                let episode = episode
-                    .expect("either group 2 or group 4 must have matched")
-                    .as_str()
-                    .parse::<u32>()
-                    .expect("failed to convert string of digits to numer")
-                    .to_string();
-                (season, episode)
-            }
-            None => ("".to_owned(), "".to_owned()),
+    pub fn new(filename: impl AsRef<str>, dictionary: &HashMap<String, (String, String)>) -> Self {
+        let prefix = extract_prefix(filename.as_ref());
+        let (name, year) = match dictionary.get(&prefix) {
+            Some((name, year)) => (name.to_owned(), year.to_owned()),
+            None => (prefix, get_year(filename.as_ref())),
         };
+        let (season, episode) = get_season_episode(filename.as_ref());
 
-        let filename = ignore.replace_all(filename.as_ref(), " ");
-        let blocks = split.split(filename.as_ref());
-        let mut name = String::new();
-        for block in blocks.filter(|s| !s.is_empty()) {
-            if year_regex.is_match(block)
-                || season_regex.is_match(block)
-                || episode_regex.is_match(block)
-                || season_episode_regex.is_match(block)
-            {
-                break;
-            }
-
-            name = name + " " + block;
-        }
         Self {
-            name: name.trim().to_owned(),
+            name,
             year,
             season,
             episode,
@@ -207,6 +223,8 @@ impl EpisodeParams {
 impl EpisodeQuerier {
     pub fn new(tvdb_auth_token: String) -> Self {
         let output = Self {
+            current_prefix: String::new(),
+            dictionary: HashMap::new(),
             query_params: EpisodeParams::default(),
             entries: Arc::new(Mutex::new(Some(Vec::new()))),
             selected: 0,
@@ -250,9 +268,16 @@ impl EpisodeQuerier {
     }
 
     pub fn query_filename(&mut self, filename: impl AsRef<str>) {
-        self.query_params(EpisodeParams::new(filename));
+        let prefix = extract_prefix(filename.as_ref());
+        let new_params = EpisodeParams::new(filename, &self.dictionary);
+        self.current_prefix = prefix;
+        self.query_params(new_params);
     }
     pub fn query_params(&mut self, params: EpisodeParams) {
+        self.dictionary.insert(
+            self.current_prefix.clone(),
+            (params.name.clone(), params.year.clone()),
+        );
         if params != self.query_params {
             if self.query_params.name != params.name || self.query_params.year != params.year {
                 self.selected = 0;
